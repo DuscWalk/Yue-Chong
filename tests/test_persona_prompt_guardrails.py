@@ -111,6 +111,7 @@ def test_build_chat_messages_contains_persona_context_and_trigger() -> None:
     assert messages[0]["role"] == "system"
     assert persona.name in messages[0]["content"]
     assert "Rules:" in messages[0]["content"]
+    assert "20 Chinese characters" in messages[0]["content"]
     assert "Bob: good morning" in messages[1]["content"]
     assert messages[-1]["content"] == "Amy: Mika hello"
 

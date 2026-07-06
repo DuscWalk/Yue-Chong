@@ -45,6 +45,8 @@ Optional tool settings:
 - `TTS_ENABLED` and `TTS_API_URL` enable optional voice replies through a local TTS HTTP service.
 - `TTS_BACKEND=generic` calls `POST /synthesize`; `TTS_BACKEND=gptsovits` calls GPT-SoVITS
   `POST /tts`.
+- `MAX_OUTPUT_CHARS` is a hard safety cap for generated replies. Use `40` for the current short
+  chat style, while the persona asks the model to stay around 20 Chinese characters.
 - `FOLLOWUP_WINDOW_SECONDS` and `FOLLOWUP_TRIGGER_KEYWORDS` control short same-user group
   follow-up windows after an `@` or reply.
 
