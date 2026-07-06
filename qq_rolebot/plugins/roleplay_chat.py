@@ -11,7 +11,7 @@ from qq_rolebot.message_segments import is_reply_to, summarize_segments
 from qq_rolebot.model_client import ModelClient
 from qq_rolebot.persona import load_persona
 from qq_rolebot.persona_sources import PersonaSourceClient
-from qq_rolebot.policy import IncomingMessage, RateLimiter
+from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter
 from qq_rolebot.service import ChatService
 from qq_rolebot.storage import Storage
 from qq_rolebot.tavily import TavilyClient
@@ -66,6 +66,10 @@ service = ChatService(
     model=model,
     rate_limiter=RateLimiter(),
     tool_runner=tool_runner,
+    followup_tracker=FollowupTracker(
+        window_seconds=settings.followup_window_seconds,
+        trigger_keywords=settings.followup_trigger_keywords,
+    ),
 )
 voice_service = None
 if settings.tts_enabled and settings.tts_api_url:

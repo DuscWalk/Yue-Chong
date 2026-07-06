@@ -4,7 +4,7 @@ import pytest
 
 from qq_rolebot.config import load_settings
 from qq_rolebot.model_client import ModelResult
-from qq_rolebot.policy import IncomingMessage, RateLimiter
+from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter
 from qq_rolebot.service import ChatService
 from qq_rolebot.storage import Storage
 
@@ -62,14 +62,21 @@ def env(tmp_path: Path) -> dict[str, str]:
     }
 
 
-def msg(text: str, *, at_bot: bool, sender: int = 11, group: int = 20) -> IncomingMessage:
+def msg(
+    text: str,
+    *,
+    at_bot: bool,
+    sender: int = 11,
+    group: int = 20,
+    created_at: int = 100,
+) -> IncomingMessage:
     return IncomingMessage(
         group_id=group,
         user_id=sender,
         nickname="Amy",
         text=text,
         is_at_bot=at_bot,
-        created_at=100,
+        created_at=created_at,
     )
 
 
@@ -193,3 +200,45 @@ async def test_service_passes_tool_context_to_model(tmp_path: Path) -> None:
 
     assert reply == "model reply"
     assert "Search query: today news" in model.messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_service_replies_to_addressed_followup_within_window(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=FakeModel(),
+        rate_limiter=RateLimiter(user_cooldown_seconds=0),
+        followup_tracker=FollowupTracker(window_seconds=90, trigger_keywords=["你", "怎么看"]),
+    )
+
+    first = await service.handle(msg("大哥", at_bot=True, created_at=100), random_value=99)
+    second = await service.handle(msg("你怎么看", at_bot=False, created_at=120), random_value=99)
+
+    assert first == "model reply"
+    assert second == "model reply"
+
+
+@pytest.mark.asyncio
+async def test_service_ignores_unaddressed_followup_within_window(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=FakeModel(),
+        rate_limiter=RateLimiter(user_cooldown_seconds=0),
+        followup_tracker=FollowupTracker(window_seconds=90, trigger_keywords=["你", "怎么看"]),
+    )
+
+    first = await service.handle(msg("大哥", at_bot=True, created_at=100), random_value=99)
+    second = await service.handle(msg("哈哈哈", at_bot=False, created_at=120), random_value=99)
+
+    assert first == "model reply"
+    assert second is None

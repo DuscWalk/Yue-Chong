@@ -42,3 +42,9 @@ Voice replies are optional and disabled by default. Set `TTS_ENABLED=true` and p
 `TTS_API_URL` at a local CosyVoice-compatible HTTP service to allow explicit voice requests.
 Large runtime artifacts such as model weights, reference audio, generated voice cache files, and
 container images should live only on the server, not in this repository.
+
+## Group Follow-Ups
+
+After someone mentions or replies to the bot in a group, `FOLLOWUP_WINDOW_SECONDS` opens a short
+same-user follow-up window. Messages in that window still need to look addressed to the bot, based
+on `FOLLOWUP_TRIGGER_KEYWORDS` or question marks, before the bot replies.

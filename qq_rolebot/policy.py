@@ -8,6 +8,7 @@ from enum import StrEnum
 class TriggerKind(StrEnum):
     NONE = "none"
     MENTION = "mention"
+    FOLLOWUP = "followup"
     KEYWORD = "keyword"
     RANDOM = "random"
 
@@ -40,13 +41,16 @@ def decide_trigger(
     random_probability: int,
     now: int,
     random_value: int,
+    followup_matched: bool = False,
 ) -> TriggerDecision:
     if not group_enabled:
         return TriggerDecision(False, TriggerKind.NONE, "group disabled")
     if muted_until > now:
         return TriggerDecision(False, TriggerKind.NONE, "group muted")
-    if message.is_at_bot:
-        return TriggerDecision(True, TriggerKind.MENTION, "mentioned")
+    if message.is_at_bot or message.is_reply_to_bot:
+        return TriggerDecision(True, TriggerKind.MENTION, "addressed")
+    if followup_matched:
+        return TriggerDecision(True, TriggerKind.FOLLOWUP, "followup")
 
     lowered = message.text.lower()
     for keyword in keywords:
@@ -57,6 +61,36 @@ def decide_trigger(
         return TriggerDecision(True, TriggerKind.RANDOM, "random")
 
     return TriggerDecision(False, TriggerKind.NONE, "no trigger")
+
+
+class FollowupTracker:
+    def __init__(self, *, window_seconds: int, trigger_keywords: list[str]) -> None:
+        self.window_seconds = window_seconds
+        self.trigger_keywords = [item.lower() for item in trigger_keywords if item.strip()]
+        self._active_until: dict[tuple[int, int], int] = {}
+
+    def record(self, message: IncomingMessage, *, now: int) -> None:
+        if message.is_private:
+            return
+        self._active_until[self._scope(message)] = now + self.window_seconds
+
+    def should_trigger(self, message: IncomingMessage, *, now: int) -> bool:
+        if message.is_private or message.is_at_bot or message.is_reply_to_bot:
+            return False
+        active_until = self._active_until.get(self._scope(message), 0)
+        if active_until <= now:
+            return False
+        return self._looks_addressed(message.text)
+
+    def _looks_addressed(self, text: str) -> bool:
+        lowered = text.lower()
+        if any(mark in lowered for mark in ("?", "？")):
+            return True
+        return any(keyword in lowered for keyword in self.trigger_keywords)
+
+    @staticmethod
+    def _scope(message: IncomingMessage) -> tuple[int, int]:
+        return (message.group_id, message.user_id)
 
 
 class RateLimiter:

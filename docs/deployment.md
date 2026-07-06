@@ -43,6 +43,8 @@ Optional tool settings:
 - `TOOLS_ENABLE_TIME`, `TOOLS_ENABLE_SEARCH`, and `TOOLS_ENABLE_PERSONA_SOURCES` control tool
   availability.
 - `TTS_ENABLED` and `TTS_API_URL` enable optional voice replies through a local TTS HTTP service.
+- `FOLLOWUP_WINDOW_SECONDS` and `FOLLOWUP_TRIGGER_KEYWORDS` control short same-user group
+  follow-up windows after an `@` or reply.
 
 Server-only TTS artifact paths:
 

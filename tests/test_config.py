@@ -98,6 +98,8 @@ def test_load_settings_reads_tts_defaults() -> None:
     assert settings.tts_speaker == "chongyue"
     assert settings.tts_style == "calm"
     assert settings.tts_dialect_hint == "neutral"
+    assert settings.followup_window_seconds == 90
+    assert "你" in settings.followup_trigger_keywords
 
 
 def test_load_settings_reads_tts_overrides() -> None:
@@ -114,6 +116,8 @@ def test_load_settings_reads_tts_overrides() -> None:
             "TTS_SPEAKER": "test-speaker",
             "TTS_STYLE": "serious",
             "TTS_DIALECT_HINT": "southwest",
+            "FOLLOWUP_WINDOW_SECONDS": "45",
+            "FOLLOWUP_TRIGGER_KEYWORDS": "你呢,怎么看",
         }
     )
 
@@ -131,6 +135,8 @@ def test_load_settings_reads_tts_overrides() -> None:
     assert settings.tts_speaker == "test-speaker"
     assert settings.tts_style == "serious"
     assert settings.tts_dialect_hint == "southwest"
+    assert settings.followup_window_seconds == 45
+    assert settings.followup_trigger_keywords == ["你呢", "怎么看"]
 
 
 def test_load_settings_rejects_missing_required_value() -> None:

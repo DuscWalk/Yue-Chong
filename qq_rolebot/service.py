@@ -7,7 +7,7 @@ from qq_rolebot.config import Settings
 from qq_rolebot.guardrails import clean_response
 from qq_rolebot.model_client import ModelResult
 from qq_rolebot.persona import load_persona
-from qq_rolebot.policy import IncomingMessage, RateLimiter, decide_trigger
+from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter, decide_trigger
 from qq_rolebot.prompting import build_chat_messages
 from qq_rolebot.storage import MessageRecord, Storage
 
@@ -31,12 +31,14 @@ class ChatService:
         model: ChatModel,
         rate_limiter: RateLimiter,
         tool_runner: ToolRunnerProtocol | None = None,
+        followup_tracker: FollowupTracker | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
         self.model = model
         self.rate_limiter = rate_limiter
         self.tool_runner = tool_runner
+        self.followup_tracker = followup_tracker
         self.persona = load_persona(settings.persona_path)
 
     async def handle(self, message: IncomingMessage, *, random_value: int) -> str | None:
@@ -67,6 +69,16 @@ class ChatService:
             )
 
         group = await self.storage.get_group_settings(message.group_id)
+        followup_matched = False
+        if self.followup_tracker is not None:
+            if message.is_at_bot or message.is_reply_to_bot:
+                self.followup_tracker.record(message, now=message.created_at)
+            else:
+                followup_matched = self.followup_tracker.should_trigger(
+                    message,
+                    now=message.created_at,
+                )
+
         decision = decide_trigger(
             message,
             group_enabled=group.enabled,
@@ -75,6 +87,7 @@ class ChatService:
             random_probability=group.random_probability,
             now=message.created_at,
             random_value=random_value,
+            followup_matched=followup_matched,
         )
         if not decision.should_reply:
             return None

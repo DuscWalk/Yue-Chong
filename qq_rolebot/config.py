@@ -85,6 +85,8 @@ class Settings:
     tts_speaker: str
     tts_style: str
     tts_dialect_hint: str
+    followup_window_seconds: int
+    followup_trigger_keywords: list[str]
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -128,6 +130,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if tts_cooldown_seconds < 0:
         raise ConfigError("TTS_COOLDOWN_SECONDS must be greater than or equal to 0")
 
+    followup_window_seconds = _int(env, "FOLLOWUP_WINDOW_SECONDS", 90)
+    if followup_window_seconds < 0:
+        raise ConfigError("FOLLOWUP_WINDOW_SECONDS must be greater than or equal to 0")
+
     admin_users = parse_int_set(_required(env, "ADMIN_USERS"))
     group_whitelist = parse_int_set(_required(env, "GROUP_WHITELIST"))
 
@@ -169,4 +175,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_speaker=env.get("TTS_SPEAKER", "chongyue").strip() or "chongyue",
         tts_style=env.get("TTS_STYLE", "calm").strip() or "calm",
         tts_dialect_hint=env.get("TTS_DIALECT_HINT", "neutral").strip() or "neutral",
+        followup_window_seconds=followup_window_seconds,
+        followup_trigger_keywords=parse_str_list(
+            env.get(
+                "FOLLOWUP_TRIGGER_KEYWORDS",
+                "\u4f60,\u4f60\u89c9\u5f97,\u4f60\u770b,\u600e\u4e48\u770b,"
+                "\u548b\u770b,\u600e\u4e48\u6837,\u5982\u4f55,\u8fd9\u4e2a\u5462,"
+                "\u90a3\u4e2a\u5462,\u8bf4\u8bdd,\u56de\u8bdd,\u5927\u54e5,"
+                "\u91cd\u5cb3,\u5cb3\u997c",
+            )
+        ),
     )
