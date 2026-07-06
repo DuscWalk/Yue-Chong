@@ -36,6 +36,8 @@ Edit `.env` and set:
 - `MODEL_API_BASE`
 - `MODEL_API_KEY`
 - `MODEL_NAME`
+- `PERSONA_VARIANT`: `dialect` by default, `standard` for the original Mandarin persona, or
+  `custom` to use `PERSONA_PATH`.
 
 Optional tool settings:
 

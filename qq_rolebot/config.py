@@ -58,6 +58,7 @@ class Settings:
     admin_users: set[int]
     group_whitelist: set[int]
     database_path: Path
+    persona_variant: str
     persona_path: Path
     model_api_base: str
     model_api_key: str
@@ -151,6 +152,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         raise ConfigError("TTS_AUDIO_FORMAT must be one of: wav, mp3")
 
     raw_tts_ref_audio_path = env.get("TTS_REF_AUDIO_PATH", "").strip()
+    persona_variant = env.get("PERSONA_VARIANT", "dialect").strip().lower() or "dialect"
+    if persona_variant not in {"dialect", "standard", "custom"}:
+        raise ConfigError("PERSONA_VARIANT must be one of: dialect, standard, custom")
+    if persona_variant == "dialect":
+        persona_path = Path("personas/default_dialect.yaml")
+    elif persona_variant == "standard":
+        persona_path = Path("personas/default.yaml")
+    else:
+        persona_path = Path(env.get("PERSONA_PATH", "personas/default.yaml"))
 
     admin_users = parse_int_set(_required(env, "ADMIN_USERS"))
     group_whitelist = parse_int_set(_required(env, "GROUP_WHITELIST"))
@@ -163,7 +173,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         admin_users=admin_users,
         group_whitelist=group_whitelist,
         database_path=Path(env.get("DATABASE_PATH", "data/rolebot.sqlite3")),
-        persona_path=Path(env.get("PERSONA_PATH", "personas/default.yaml")),
+        persona_variant=persona_variant,
+        persona_path=persona_path,
         model_api_base=_required(env, "MODEL_API_BASE").rstrip("/"),
         model_api_key=_required(env, "MODEL_API_KEY"),
         model_name=_required(env, "MODEL_NAME"),

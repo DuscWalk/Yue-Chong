@@ -28,6 +28,12 @@ ws://127.0.0.1:8080/onebot/v11/ws
 
 Set the same access token in NapCatQQ and `ONEBOT_ACCESS_TOKEN`.
 
+## Persona Variant
+
+`PERSONA_VARIANT=dialect` is the default and loads `personas/default_dialect.yaml`.
+Set `PERSONA_VARIANT=standard` to use the original Mandarin-style `personas/default.yaml`.
+Set `PERSONA_VARIANT=custom` to load the explicit `PERSONA_PATH` value.
+
 ## Tools
 
 The bot can answer current-time questions directly and can use Tavily search when a private

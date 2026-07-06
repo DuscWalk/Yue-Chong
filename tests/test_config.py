@@ -43,6 +43,29 @@ def test_load_settings_from_mapping() -> None:
     assert settings.keywords == ["mika", "bot"]
     assert settings.sensitive_words == ["blocked"]
     assert settings.default_random_reply_probability == 8
+    assert settings.persona_variant == "dialect"
+    assert settings.persona_path.as_posix() == "personas/default_dialect.yaml"
+
+
+def test_load_settings_reads_standard_persona_variant() -> None:
+    env = complete_env()
+    env["PERSONA_VARIANT"] = "standard"
+
+    settings = load_settings(env)
+
+    assert settings.persona_variant == "standard"
+    assert settings.persona_path.as_posix() == "personas/default.yaml"
+
+
+def test_load_settings_reads_custom_persona_path() -> None:
+    env = complete_env()
+    env["PERSONA_VARIANT"] = "custom"
+    env["PERSONA_PATH"] = "personas/special.yaml"
+
+    settings = load_settings(env)
+
+    assert settings.persona_variant == "custom"
+    assert settings.persona_path.as_posix() == "personas/special.yaml"
 
 
 def test_load_settings_reads_tool_defaults() -> None:
