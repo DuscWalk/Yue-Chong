@@ -55,7 +55,9 @@ checkout_code() {
 
   git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
   cd "$APP_DIR"
-  git fetch origin "$TARGET_SHA"
+  if ! git cat-file -e "$TARGET_SHA^{commit}" 2>/dev/null; then
+    git fetch origin "$BRANCH"
+  fi
   git reset --hard "$TARGET_SHA"
 
   if [[ -d "$backup_dir" ]]; then
