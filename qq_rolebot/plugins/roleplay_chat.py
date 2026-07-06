@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+import random
+import time
+
+from nonebot import get_driver, on_message
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
+
+from qq_rolebot.config import load_settings
+from qq_rolebot.message_segments import is_reply_to, summarize_segments
+from qq_rolebot.model_client import ModelClient
+from qq_rolebot.persona import load_persona
+from qq_rolebot.persona_sources import PersonaSourceClient
+from qq_rolebot.policy import IncomingMessage, RateLimiter
+from qq_rolebot.service import ChatService
+from qq_rolebot.storage import Storage
+from qq_rolebot.tavily import TavilyClient
+from qq_rolebot.time_tool import TimeTool
+from qq_rolebot.tool_router import ToolRouter
+from qq_rolebot.tool_runner import ToolRunner
+
+settings = load_settings()
+storage = Storage(
+    settings.database_path,
+    context_limit=20,
+    default_probability=settings.default_random_reply_probability,
+)
+model = ModelClient(
+    api_base=settings.model_api_base,
+    api_key=settings.model_api_key,
+    model_name=settings.model_name,
+    timeout_seconds=settings.model_timeout_seconds,
+)
+persona = load_persona(settings.persona_path)
+search_client = None
+if settings.tavily_api_key:
+    search_client = TavilyClient(
+        api_key=settings.tavily_api_key,
+        api_base=settings.tavily_api_base,
+        timeout_seconds=settings.search_timeout_seconds,
+    )
+
+persona_source_client = PersonaSourceClient(
+    sources=persona.sources,
+    timeout_seconds=settings.search_timeout_seconds,
+)
+tool_runner = ToolRunner(
+    router=ToolRouter(
+        search_cooldown_seconds=settings.search_cooldown_seconds,
+        persona_names=[persona.name, "Chongyue", "\u91cd\u5cb3"],
+    ),
+    time_tool=TimeTool(timezone="Asia/Shanghai"),
+    search_client=search_client,
+    persona_source_client=persona_source_client,
+    search_max_results=settings.search_max_results,
+    enable_time=settings.tools_enable_time,
+    enable_search=settings.tools_enable_search and search_client is not None,
+    enable_persona_sources=settings.tools_enable_persona_sources,
+)
+service = ChatService(
+    settings=settings,
+    storage=storage,
+    model=model,
+    rate_limiter=RateLimiter(),
+    tool_runner=tool_runner,
+)
+
+matcher = on_message(priority=50, block=False)
+
+
+async def init_storage() -> None:
+    await storage.init()
+
+
+try:
+    driver = get_driver()
+except ValueError:
+    driver = None
+
+if driver is not None:
+    driver.on_startup(init_storage)
+
+
+def extract_message_text(event: MessageEvent) -> str:
+    message = getattr(event, "message", None)
+    if message is None:
+        return event.get_plaintext().strip()
+    text = summarize_segments(message).strip()
+    return text or event.get_plaintext().strip()
+
+
+def is_at_bot(event: GroupMessageEvent, bot_id: int) -> bool:
+    for segment in event.message:
+        if segment.type == "at" and str(segment.data.get("qq")) == str(bot_id):
+            return True
+    return False
+
+
+def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage | None:
+    text = extract_message_text(event)
+    if not text:
+        return None
+
+    sender = event.sender
+    nickname = getattr(sender, "card", "") or getattr(sender, "nickname", "") or str(event.user_id)
+    message_type = getattr(event, "message_type", "")
+    if message_type == "private":
+        return IncomingMessage(
+            group_id=0,
+            user_id=int(event.user_id),
+            nickname=nickname,
+            text=text,
+            is_at_bot=False,
+            is_private=True,
+            is_reply_to_bot=False,
+            created_at=int(getattr(event, "time", int(time.time()))),
+        )
+
+    if message_type == "group":
+        return IncomingMessage(
+            group_id=int(event.group_id),
+            user_id=int(event.user_id),
+            nickname=nickname,
+            text=text,
+            is_at_bot=is_at_bot(event, bot_id),
+            is_reply_to_bot=is_reply_to(getattr(event, "message", [])),
+            created_at=int(getattr(event, "time", int(time.time()))),
+        )
+
+    return None
+
+
+@matcher.handle()
+async def handle_message(bot: Bot, event: MessageEvent) -> None:
+    incoming = build_incoming_message(event, settings.bot_qq)
+    if incoming is None:
+        return
+
+    reply = await service.handle(incoming, random_value=random.randrange(100))
+    if reply:
+        await bot.send(event, MessageSegment.text(reply))

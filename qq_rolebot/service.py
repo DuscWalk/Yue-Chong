@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+from qq_rolebot.admin import handle_admin_command, is_admin_command
+from qq_rolebot.config import Settings
+from qq_rolebot.guardrails import clean_response
+from qq_rolebot.model_client import ModelResult
+from qq_rolebot.persona import load_persona
+from qq_rolebot.policy import IncomingMessage, RateLimiter, decide_trigger
+from qq_rolebot.prompting import build_chat_messages
+from qq_rolebot.storage import MessageRecord, Storage
+
+
+class ChatModel(Protocol):
+    async def chat(self, messages: list[dict[str, str]]) -> ModelResult:
+        ...
+
+
+class ToolRunnerProtocol(Protocol):
+    async def run(self, message: IncomingMessage):
+        ...
+
+
+class ChatService:
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        storage: Storage,
+        model: ChatModel,
+        rate_limiter: RateLimiter,
+        tool_runner: ToolRunnerProtocol | None = None,
+    ) -> None:
+        self.settings = settings
+        self.storage = storage
+        self.model = model
+        self.rate_limiter = rate_limiter
+        self.tool_runner = tool_runner
+        self.persona = load_persona(settings.persona_path)
+
+    async def handle(self, message: IncomingMessage, *, random_value: int) -> str | None:
+        if message.is_private:
+            return await self._handle_private(message)
+
+        if message.group_id not in self.settings.group_whitelist:
+            return None
+
+        await self.storage.save_message(
+            MessageRecord(
+                group_id=message.group_id,
+                user_id=message.user_id,
+                nickname=message.nickname,
+                text=message.text,
+                created_at=message.created_at,
+            )
+        )
+
+        if is_admin_command(message.text):
+            return await handle_admin_command(
+                message.text,
+                sender_id=message.user_id,
+                group_id=message.group_id,
+                now=message.created_at,
+                settings=self.settings,
+                storage=self.storage,
+            )
+
+        group = await self.storage.get_group_settings(message.group_id)
+        decision = decide_trigger(
+            message,
+            group_enabled=group.enabled,
+            muted_until=group.muted_until,
+            keywords=self.settings.keywords,
+            random_probability=group.random_probability,
+            now=message.created_at,
+            random_value=random_value,
+        )
+        if not decision.should_reply:
+            return None
+
+        if not self.rate_limiter.allow(message.group_id, message.user_id, now=message.created_at):
+            return None
+
+        tool_context = ""
+        if self.tool_runner is not None:
+            tool_result = await self.tool_runner.run(message)
+            if getattr(tool_result, "direct_reply", None):
+                reply = clean_response(
+                    tool_result.direct_reply,
+                    max_chars=self.settings.max_output_chars,
+                    sensitive_words=self.settings.sensitive_words,
+                )
+                if reply is not None:
+                    self.rate_limiter.record(
+                        message.group_id, message.user_id, now=message.created_at
+                    )
+                return reply
+            tool_context = str(getattr(tool_result, "context", "") or "")
+
+        context = await self.storage.recent_messages(message.group_id)
+        result = await self.model.chat(
+            build_chat_messages(self.persona, context, message, tool_context=tool_context)
+        )
+        if not result.ok:
+            return None
+
+        reply = clean_response(
+            result.text,
+            max_chars=self.settings.max_output_chars,
+            sensitive_words=self.settings.sensitive_words,
+        )
+        if reply is None:
+            return None
+
+        self.rate_limiter.record(message.group_id, message.user_id, now=message.created_at)
+        return reply
+
+    async def _handle_private(self, message: IncomingMessage) -> str | None:
+        context_id = -abs(message.user_id)
+        await self.storage.save_message(
+            MessageRecord(
+                group_id=context_id,
+                user_id=message.user_id,
+                nickname=message.nickname,
+                text=message.text,
+                created_at=message.created_at,
+            )
+        )
+
+        if not self.rate_limiter.allow(context_id, message.user_id, now=message.created_at):
+            return None
+
+        tool_context = ""
+        if self.tool_runner is not None:
+            tool_result = await self.tool_runner.run(message)
+            if getattr(tool_result, "direct_reply", None):
+                reply = clean_response(
+                    tool_result.direct_reply,
+                    max_chars=self.settings.max_output_chars,
+                    sensitive_words=self.settings.sensitive_words,
+                )
+                if reply is not None:
+                    self.rate_limiter.record(context_id, message.user_id, now=message.created_at)
+                return reply
+            tool_context = str(getattr(tool_result, "context", "") or "")
+
+        context = await self.storage.recent_messages(context_id)
+        result = await self.model.chat(
+            build_chat_messages(self.persona, context, message, tool_context=tool_context)
+        )
+        if not result.ok:
+            return None
+
+        reply = clean_response(
+            result.text,
+            max_chars=self.settings.max_output_chars,
+            sensitive_words=self.settings.sensitive_words,
+        )
+        if reply is None:
+            return None
+
+        self.rate_limiter.record(context_id, message.user_id, now=message.created_at)
+        return reply
