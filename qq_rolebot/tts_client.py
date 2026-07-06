@@ -109,6 +109,8 @@ class TTSClient:
         input_payload: dict[str, object] = {
             "text": text,
             "voice": speaker,
+            "format": self.audio_format,
+            "sample_rate": 24000,
         }
         if self.text_lang:
             input_payload["language_hints"] = [self.text_lang]
@@ -120,9 +122,6 @@ class TTSClient:
         payload = {
             "model": self.model,
             "input": input_payload,
-            "parameters": {
-                "format": self.audio_format,
-            },
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
 

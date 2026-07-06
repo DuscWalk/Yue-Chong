@@ -128,9 +128,11 @@ async def test_aliyun_cosyvoice_backend_posts_to_speech_synthesizer_and_download
             assert payload["model"] == "cosyvoice-v2"
             assert payload["input"]["text"] == "你好"
             assert payload["input"]["voice"] == "chongyue-voice"
+            assert payload["input"]["format"] == "mp3"
+            assert payload["input"]["sample_rate"] == 24000
             assert payload["input"]["language_hints"] == ["zh"]
             assert "southwest" in payload["input"]["instruction"]
-            assert payload["parameters"]["format"] == "mp3"
+            assert "parameters" not in payload
             return httpx.Response(
                 200,
                 json={
