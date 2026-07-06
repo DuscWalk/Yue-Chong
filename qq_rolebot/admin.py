@@ -37,7 +37,7 @@ async def handle_admin_command(
 
     parts = text.strip().split()
     if len(parts) < 2 or parts[0] != "/bot":
-        return "usage: /bot on|off|mute|prob|clear|status"
+        return "usage: /bot on|off|mute|prob|clear|status|persona"
 
     command = parts[1].lower()
     if command == "on":
@@ -70,4 +70,4 @@ async def handle_admin_command(
             f"random_probability={group.random_probability}%, "
             f"muted_until={group.muted_until}"
         )
-    return "usage: /bot on|off|mute|prob|clear|status"
+    return "usage: /bot on|off|mute|prob|clear|status|persona"

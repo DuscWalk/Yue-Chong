@@ -111,6 +111,37 @@ async def test_service_handles_admin_command(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_service_switches_persona_variant_by_admin_command(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=FakeModel(),
+        rate_limiter=RateLimiter(),
+    )
+
+    assert "方言人格" in service.persona.profile
+
+    reply = await service.handle(
+        msg("/bot persona standard", at_bot=False, sender=10),
+        random_value=99,
+    )
+
+    assert reply == "persona switched to standard"
+    assert "方言人格" not in service.persona.profile
+
+    reply = await service.handle(
+        msg("/bot persona dialect", at_bot=False, sender=10),
+        random_value=99,
+    )
+
+    assert reply == "persona switched to dialect"
+    assert "方言人格" in service.persona.profile
+
+
+@pytest.mark.asyncio
 async def test_service_replies_to_mention_when_enabled(tmp_path: Path) -> None:
     settings = load_settings(env(tmp_path))
     storage = Storage(settings.database_path)

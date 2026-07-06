@@ -41,6 +41,15 @@ class ChatService:
         self.followup_tracker = followup_tracker
         self.persona = load_persona(settings.persona_path)
 
+    def _switch_persona(self, variant: str) -> str:
+        if variant == "dialect":
+            self.persona = load_persona(self.settings.persona_path.parent / "default_dialect.yaml")
+            return "persona switched to dialect"
+        if variant == "standard":
+            self.persona = load_persona(self.settings.persona_path.parent / "default.yaml")
+            return "persona switched to standard"
+        return "usage: /bot persona dialect|standard"
+
     async def handle(self, message: IncomingMessage, *, random_value: int) -> str | None:
         if message.is_private:
             return await self._handle_private(message)
@@ -59,6 +68,14 @@ class ChatService:
         )
 
         if is_admin_command(message.text):
+            parts = message.text.strip().split()
+            if (
+                len(parts) == 3
+                and parts[0] == "/bot"
+                and parts[1].lower() == "persona"
+                and message.user_id in self.settings.admin_users
+            ):
+                return self._switch_persona(parts[2].lower())
             return await handle_admin_command(
                 message.text,
                 sender_id=message.user_id,
