@@ -18,6 +18,9 @@ from qq_rolebot.tavily import TavilyClient
 from qq_rolebot.time_tool import TimeTool
 from qq_rolebot.tool_router import ToolRouter
 from qq_rolebot.tool_runner import ToolRunner
+from qq_rolebot.tts_client import TTSClient
+from qq_rolebot.voice_policy import VoicePolicy
+from qq_rolebot.voice_service import VoiceService
 
 settings = load_settings()
 storage = Storage(
@@ -64,6 +67,24 @@ service = ChatService(
     rate_limiter=RateLimiter(),
     tool_runner=tool_runner,
 )
+voice_service = None
+if settings.tts_enabled and settings.tts_api_url:
+    voice_service = VoiceService(
+        enabled=True,
+        policy=VoicePolicy(
+            trigger_keywords=settings.tts_trigger_keywords,
+            cooldown_seconds=settings.tts_cooldown_seconds,
+        ),
+        client=TTSClient(
+            api_url=settings.tts_api_url,
+            timeout_seconds=settings.tts_timeout_seconds,
+        ),
+        cache_dir=settings.tts_cache_dir,
+        max_chars=settings.tts_max_chars,
+        speaker=settings.tts_speaker,
+        style=settings.tts_style,
+        dialect_hint=settings.tts_dialect_hint,
+    )
 
 matcher = on_message(priority=50, block=False)
 
@@ -138,4 +159,9 @@ async def handle_message(bot: Bot, event: MessageEvent) -> None:
 
     reply = await service.handle(incoming, random_value=random.randrange(100))
     if reply:
+        if voice_service is not None:
+            voice = await voice_service.maybe_render(incoming, reply=reply)
+            if voice.file_path is not None:
+                await bot.send(event, MessageSegment.record(str(voice.file_path)))
+                return
         await bot.send(event, MessageSegment.text(reply))

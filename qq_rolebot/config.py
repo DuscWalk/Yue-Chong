@@ -75,6 +75,16 @@ class Settings:
     tools_enable_search: bool
     tools_enable_persona_sources: bool
     tools_enable_time: bool
+    tts_enabled: bool
+    tts_api_url: str
+    tts_timeout_seconds: int
+    tts_trigger_keywords: list[str]
+    tts_max_chars: int
+    tts_cooldown_seconds: int
+    tts_cache_dir: Path
+    tts_speaker: str
+    tts_style: str
+    tts_dialect_hint: str
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -106,6 +116,18 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if search_cooldown_seconds < 0:
         raise ConfigError("SEARCH_COOLDOWN_SECONDS must be greater than or equal to 0")
 
+    tts_timeout_seconds = _int(env, "TTS_TIMEOUT_SECONDS", 20)
+    if tts_timeout_seconds < 1:
+        raise ConfigError("TTS_TIMEOUT_SECONDS must be greater than 0")
+
+    tts_max_chars = _int(env, "TTS_MAX_CHARS", 80)
+    if tts_max_chars < 1:
+        raise ConfigError("TTS_MAX_CHARS must be greater than 0")
+
+    tts_cooldown_seconds = _int(env, "TTS_COOLDOWN_SECONDS", 120)
+    if tts_cooldown_seconds < 0:
+        raise ConfigError("TTS_COOLDOWN_SECONDS must be greater than or equal to 0")
+
     admin_users = parse_int_set(_required(env, "ADMIN_USERS"))
     group_whitelist = parse_int_set(_required(env, "GROUP_WHITELIST"))
 
@@ -135,4 +157,16 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tools_enable_search=_bool(env, "TOOLS_ENABLE_SEARCH", True),
         tools_enable_persona_sources=_bool(env, "TOOLS_ENABLE_PERSONA_SOURCES", True),
         tools_enable_time=_bool(env, "TOOLS_ENABLE_TIME", True),
+        tts_enabled=_bool(env, "TTS_ENABLED", False),
+        tts_api_url=env.get("TTS_API_URL", "").strip().rstrip("/"),
+        tts_timeout_seconds=tts_timeout_seconds,
+        tts_trigger_keywords=parse_str_list(
+            env.get("TTS_TRIGGER_KEYWORDS", "语音,说句话,念一下,用你的声音")
+        ),
+        tts_max_chars=tts_max_chars,
+        tts_cooldown_seconds=tts_cooldown_seconds,
+        tts_cache_dir=Path(env.get("TTS_CACHE_DIR", "data/voice_cache")),
+        tts_speaker=env.get("TTS_SPEAKER", "chongyue").strip() or "chongyue",
+        tts_style=env.get("TTS_STYLE", "calm").strip() or "calm",
+        tts_dialect_hint=env.get("TTS_DIALECT_HINT", "neutral").strip() or "neutral",
     )

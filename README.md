@@ -35,3 +35,10 @@ message or explicitly addressed group message asks for current external informat
 
 Set `TAVILY_API_KEY` in `.env` to enable web search. Do not commit real API keys.
 Persona source lookup reads the `Sources` list from `personas/default.yaml`.
+
+## Voice Replies
+
+Voice replies are optional and disabled by default. Set `TTS_ENABLED=true` and point
+`TTS_API_URL` at a local CosyVoice-compatible HTTP service to allow explicit voice requests.
+Large runtime artifacts such as model weights, reference audio, generated voice cache files, and
+container images should live only on the server, not in this repository.

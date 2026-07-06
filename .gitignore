@@ -13,8 +13,26 @@ __pycache__/
 !.env.example
 
 data/
+models/
+voice_refs/
+voice_cache/
 *.sqlite
 *.sqlite3
 *.db
 
 *.tar.gz
+*.tar
+*.zip
+*.7z
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.bin
+*.gguf
+*.wav
+*.mp3
+*.ogg
+*.amr
+*.flac

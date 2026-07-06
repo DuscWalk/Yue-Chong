@@ -85,6 +85,54 @@ def test_load_settings_reads_tool_overrides() -> None:
     assert settings.tools_enable_time is False
 
 
+def test_load_settings_reads_tts_defaults() -> None:
+    settings = load_settings(complete_env())
+
+    assert settings.tts_enabled is False
+    assert settings.tts_api_url == ""
+    assert settings.tts_timeout_seconds == 20
+    assert settings.tts_trigger_keywords == ["语音", "说句话", "念一下", "用你的声音"]
+    assert settings.tts_max_chars == 80
+    assert settings.tts_cooldown_seconds == 120
+    assert settings.tts_cache_dir.name == "voice_cache"
+    assert settings.tts_speaker == "chongyue"
+    assert settings.tts_style == "calm"
+    assert settings.tts_dialect_hint == "neutral"
+
+
+def test_load_settings_reads_tts_overrides() -> None:
+    env = complete_env()
+    env.update(
+        {
+            "TTS_ENABLED": "true",
+            "TTS_API_URL": "http://127.0.0.1:5005",
+            "TTS_TIMEOUT_SECONDS": "8",
+            "TTS_TRIGGER_KEYWORDS": "发语音,读一下",
+            "TTS_MAX_CHARS": "42",
+            "TTS_COOLDOWN_SECONDS": "15",
+            "TTS_CACHE_DIR": "data/test_voice_cache",
+            "TTS_SPEAKER": "test-speaker",
+            "TTS_STYLE": "serious",
+            "TTS_DIALECT_HINT": "southwest",
+        }
+    )
+
+    settings = load_settings(env)
+
+    assert settings.tts_enabled is True
+    assert settings.tts_api_url == "http://127.0.0.1:5005"
+    assert settings.tts_timeout_seconds == 8
+    assert settings.tts_trigger_keywords == ["发语音", "读一下"]
+    assert settings.tts_max_chars == 42
+    assert settings.tts_cooldown_seconds == 15
+    assert str(settings.tts_cache_dir) == "data\\test_voice_cache" or str(
+        settings.tts_cache_dir
+    ) == "data/test_voice_cache"
+    assert settings.tts_speaker == "test-speaker"
+    assert settings.tts_style == "serious"
+    assert settings.tts_dialect_hint == "southwest"
+
+
 def test_load_settings_rejects_missing_required_value() -> None:
     env = complete_env()
     env["MODEL_API_KEY"] = ""

@@ -42,6 +42,17 @@ Optional tool settings:
 - `TAVILY_API_KEY` enables Tavily web search.
 - `TOOLS_ENABLE_TIME`, `TOOLS_ENABLE_SEARCH`, and `TOOLS_ENABLE_PERSONA_SOURCES` control tool
   availability.
+- `TTS_ENABLED` and `TTS_API_URL` enable optional voice replies through a local TTS HTTP service.
+
+Server-only TTS artifact paths:
+
+- `/opt/cosyvoice` for the CosyVoice runtime service.
+- `/opt/models/cosyvoice` for model weights.
+- `/opt/qq-rolebot/data/voice_refs/chongyue` for authorized reference audio.
+- `/opt/qq-rolebot/data/voice_cache` for generated outgoing voice files.
+
+Do not copy model weights, container images, reference audio, converted datasets, or generated
+voice cache files into the local workspace or git repository.
 
 ## 2. Run tests on the server
 
@@ -122,6 +133,19 @@ journalctl -u qq-rolebot -n 80 --no-pager
 ```
 
 Never paste the real key into committed files or public logs.
+
+### Optional CosyVoice TTS
+
+Run CosyVoice as a separate service bound to `127.0.0.1`, then set:
+
+```dotenv
+TTS_ENABLED=true
+TTS_API_URL=http://127.0.0.1:5005
+TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
+```
+
+The bot expects `POST /synthesize` to return either raw audio bytes or JSON containing base64
+audio. If TTS fails or times out, the bot falls back to the original text reply.
 
 ## 5. First group test
 
