@@ -92,7 +92,12 @@ class ChatService:
         if not decision.should_reply:
             return None
 
-        if not self.rate_limiter.allow(message.group_id, message.user_id, now=message.created_at):
+        addressed = message.is_at_bot or message.is_reply_to_bot
+        if not addressed and not self.rate_limiter.allow(
+            message.group_id,
+            message.user_id,
+            now=message.created_at,
+        ):
             return None
 
         tool_context = ""

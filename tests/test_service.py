@@ -129,6 +129,26 @@ async def test_service_replies_to_mention_when_enabled(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_service_does_not_rate_limit_direct_mentions(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=FakeModel(),
+        rate_limiter=RateLimiter(group_limit=1, user_cooldown_seconds=100),
+    )
+
+    first = await service.handle(msg("first", at_bot=True, created_at=100), random_value=99)
+    second = await service.handle(msg("second", at_bot=True, created_at=101), random_value=99)
+
+    assert first == "model reply"
+    assert second == "model reply"
+
+
+@pytest.mark.asyncio
 async def test_service_ignores_non_whitelisted_group(tmp_path: Path) -> None:
     settings = load_settings(env(tmp_path))
     storage = Storage(settings.database_path)
