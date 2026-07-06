@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from qq_rolebot.persona import Persona
 from qq_rolebot.policy import IncomingMessage
 from qq_rolebot.storage import MessageRecord
@@ -18,6 +21,16 @@ def _section(title: str, content: str) -> str:
     return f"{title}:\n{content}"
 
 
+def _format_local_time(timestamp: int) -> str:
+    return datetime.fromtimestamp(timestamp, ZoneInfo("Asia/Shanghai")).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+
+def _context_line(item: MessageRecord) -> str:
+    return f"[{_format_local_time(item.created_at)}] {item.nickname}: {item.text}"
+
+
 def build_chat_messages(
     persona: Persona,
     context: list[MessageRecord],
@@ -25,10 +38,14 @@ def build_chat_messages(
     *,
     tool_context: str = "",
 ) -> list[dict[str, str]]:
+    current_time = _format_local_time(trigger.created_at)
     system = "\n".join(
         item
         for item in [
             f"You are {persona.name}.",
+            f"Current local time: {current_time} (Asia/Shanghai).",
+            "Use the current local time before answering greetings or daily-life questions.",
+            "Do not assume it is morning, noon, or evening from persona flavor text.",
             _section("Language", persona.language),
             _section("User name", persona.user_name),
             _section("Profile", persona.profile),
@@ -49,11 +66,11 @@ def build_chat_messages(
         ]
         if item
     )
-    context_text = "\n".join(f"{item.nickname}: {item.text}" for item in context[-20:])
+    context_text = "\n".join(_context_line(item) for item in context[-20:])
     if not context_text:
         context_text = "No recent context."
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": f"Recent group context:\n{context_text}"},
+        {"role": "user", "content": f"Recent chat context:\n{context_text}"},
         {"role": "user", "content": f"{trigger.nickname}: {trigger.text}"},
     ]
