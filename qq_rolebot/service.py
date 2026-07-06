@@ -92,14 +92,6 @@ class ChatService:
         if not decision.should_reply:
             return None
 
-        addressed = message.is_at_bot or message.is_reply_to_bot
-        if not addressed and not self.rate_limiter.allow(
-            message.group_id,
-            message.user_id,
-            now=message.created_at,
-        ):
-            return None
-
         tool_context = ""
         if self.tool_runner is not None:
             tool_result = await self.tool_runner.run(message)
@@ -109,10 +101,6 @@ class ChatService:
                     max_chars=self.settings.max_output_chars,
                     sensitive_words=self.settings.sensitive_words,
                 )
-                if reply is not None:
-                    self.rate_limiter.record(
-                        message.group_id, message.user_id, now=message.created_at
-                    )
                 return reply
             tool_context = str(getattr(tool_result, "context", "") or "")
 
@@ -131,7 +119,6 @@ class ChatService:
         if reply is None:
             return None
 
-        self.rate_limiter.record(message.group_id, message.user_id, now=message.created_at)
         return reply
 
     async def _handle_private(self, message: IncomingMessage) -> str | None:
@@ -146,9 +133,6 @@ class ChatService:
             )
         )
 
-        if not self.rate_limiter.allow(context_id, message.user_id, now=message.created_at):
-            return None
-
         tool_context = ""
         if self.tool_runner is not None:
             tool_result = await self.tool_runner.run(message)
@@ -158,8 +142,6 @@ class ChatService:
                     max_chars=self.settings.max_output_chars,
                     sensitive_words=self.settings.sensitive_words,
                 )
-                if reply is not None:
-                    self.rate_limiter.record(context_id, message.user_id, now=message.created_at)
                 return reply
             tool_context = str(getattr(tool_result, "context", "") or "")
 
@@ -178,5 +160,4 @@ class ChatService:
         if reply is None:
             return None
 
-        self.rate_limiter.record(context_id, message.user_id, now=message.created_at)
         return reply
