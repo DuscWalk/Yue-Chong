@@ -43,6 +43,8 @@ Optional tool settings:
 - `TOOLS_ENABLE_TIME`, `TOOLS_ENABLE_SEARCH`, and `TOOLS_ENABLE_PERSONA_SOURCES` control tool
   availability.
 - `TTS_ENABLED` and `TTS_API_URL` enable optional voice replies through a local TTS HTTP service.
+- `TTS_BACKEND=generic` calls `POST /synthesize`; `TTS_BACKEND=gptsovits` calls GPT-SoVITS
+  `POST /tts`.
 - `FOLLOWUP_WINDOW_SECONDS` and `FOLLOWUP_TRIGGER_KEYWORDS` control short same-user group
   follow-up windows after an `@` or reply.
 
@@ -50,6 +52,8 @@ Server-only TTS artifact paths:
 
 - `/opt/cosyvoice` for the CosyVoice runtime service.
 - `/opt/models/cosyvoice` for model weights.
+- `/opt/gptsovits` for the GPT-SoVITS runtime service.
+- `/opt/models/gptsovits` for GPT-SoVITS model weights.
 - `/opt/qq-rolebot/data/voice_refs/chongyue` for authorized reference audio.
 - `/opt/qq-rolebot/data/voice_cache` for generated outgoing voice files.
 
@@ -166,6 +170,25 @@ TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
 
 The bot expects `POST /synthesize` to return either raw audio bytes or JSON containing base64
 audio. If TTS fails or times out, the bot falls back to the original text reply.
+
+### Optional GPT-SoVITS CPU TTS
+
+Run GPT-SoVITS as a separate service bound to `127.0.0.1`, then set:
+
+```dotenv
+TTS_ENABLED=true
+TTS_BACKEND=gptsovits
+TTS_API_URL=http://127.0.0.1:9880
+TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
+TTS_REF_AUDIO_PATH=/opt/qq-rolebot/data/voice_refs/chongyue/topolect/cn_001.wav
+TTS_PROMPT_TEXT=
+TTS_PROMPT_LANG=zh
+TTS_TEXT_LANG=zh
+TTS_TIMEOUT_SECONDS=120
+```
+
+`TTS_PROMPT_TEXT` must match the selected authorized reference audio. GPT-SoVITS artifacts stay
+under `/opt/gptsovits`, `/opt/models/gptsovits`, and `/opt/qq-rolebot/data`; do not commit them.
 
 ## 5. First group test
 

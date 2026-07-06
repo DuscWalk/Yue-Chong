@@ -147,6 +147,34 @@ def test_load_settings_rejects_missing_required_value() -> None:
         load_settings(env)
 
 
+def test_load_settings_reads_gptsovits_tts_overrides() -> None:
+    env = complete_env()
+    env.update(
+        {
+            "TTS_BACKEND": "gptsovits",
+            "TTS_REF_AUDIO_PATH": "/opt/qq-rolebot/data/voice_refs/chongyue/topolect/cn_001.wav",
+            "TTS_PROMPT_TEXT": "reference line",
+            "TTS_PROMPT_LANG": "zh",
+            "TTS_TEXT_LANG": "zh",
+        }
+    )
+
+    settings = load_settings(env)
+
+    assert settings.tts_backend == "gptsovits"
+    assert settings.tts_ref_audio_path is not None
+    assert settings.tts_ref_audio_path.parts[-5:] == (
+        "data",
+        "voice_refs",
+        "chongyue",
+        "topolect",
+        "cn_001.wav",
+    )
+    assert settings.tts_prompt_text == "reference line"
+    assert settings.tts_prompt_lang == "zh"
+    assert settings.tts_text_lang == "zh"
+
+
 def test_load_settings_rejects_invalid_probability() -> None:
     env = complete_env()
     env["DEFAULT_RANDOM_REPLY_PROBABILITY"] = "101"

@@ -85,6 +85,11 @@ class Settings:
     tts_speaker: str
     tts_style: str
     tts_dialect_hint: str
+    tts_backend: str
+    tts_ref_audio_path: Path | None
+    tts_prompt_text: str
+    tts_prompt_lang: str
+    tts_text_lang: str
     followup_window_seconds: int
     followup_trigger_keywords: list[str]
 
@@ -134,6 +139,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if followup_window_seconds < 0:
         raise ConfigError("FOLLOWUP_WINDOW_SECONDS must be greater than or equal to 0")
 
+    tts_backend = env.get("TTS_BACKEND", "generic").strip().lower() or "generic"
+    if tts_backend not in {"generic", "gptsovits"}:
+        raise ConfigError("TTS_BACKEND must be one of: generic, gptsovits")
+
+    raw_tts_ref_audio_path = env.get("TTS_REF_AUDIO_PATH", "").strip()
+
     admin_users = parse_int_set(_required(env, "ADMIN_USERS"))
     group_whitelist = parse_int_set(_required(env, "GROUP_WHITELIST"))
 
@@ -175,6 +186,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_speaker=env.get("TTS_SPEAKER", "chongyue").strip() or "chongyue",
         tts_style=env.get("TTS_STYLE", "calm").strip() or "calm",
         tts_dialect_hint=env.get("TTS_DIALECT_HINT", "neutral").strip() or "neutral",
+        tts_backend=tts_backend,
+        tts_ref_audio_path=Path(raw_tts_ref_audio_path) if raw_tts_ref_audio_path else None,
+        tts_prompt_text=env.get("TTS_PROMPT_TEXT", "").strip(),
+        tts_prompt_lang=env.get("TTS_PROMPT_LANG", "zh").strip() or "zh",
+        tts_text_lang=env.get("TTS_TEXT_LANG", "zh").strip() or "zh",
         followup_window_seconds=followup_window_seconds,
         followup_trigger_keywords=parse_str_list(
             env.get(

@@ -79,3 +79,40 @@ async def test_tts_client_returns_failure_for_http_error() -> None:
 
     assert result.ok is False
     assert "503" in result.error
+
+
+@pytest.mark.asyncio
+async def test_gptsovits_backend_posts_to_tts_endpoint() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        assert request.url.path == "/tts"
+        assert payload["text"] == "hello"
+        assert payload["text_lang"] == "zh"
+        assert payload["ref_audio_path"] == "/opt/refs/cn_001.wav"
+        assert payload["prompt_text"] == "reference line"
+        assert payload["prompt_lang"] == "zh"
+        assert payload["media_type"] == "wav"
+        assert payload["streaming_mode"] is False
+        return httpx.Response(200, content=b"RIFFgptsovits", headers={"content-type": "audio/wav"})
+
+    client = TTSClient(
+        api_url="http://gptsovits.test",
+        timeout_seconds=5,
+        backend="gptsovits",
+        ref_audio_path="/opt/refs/cn_001.wav",
+        prompt_text="reference line",
+        prompt_lang="zh",
+        text_lang="zh",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.synthesize(
+        text="hello",
+        speaker="chongyue",
+        style="calm",
+        dialect_hint="southwest",
+    )
+
+    assert result.ok is True
+    assert result.audio == b"RIFFgptsovits"
+    assert result.extension == ".wav"

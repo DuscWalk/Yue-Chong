@@ -82,6 +82,11 @@ if settings.tts_enabled and settings.tts_api_url:
         client=TTSClient(
             api_url=settings.tts_api_url,
             timeout_seconds=settings.tts_timeout_seconds,
+            backend=settings.tts_backend,
+            ref_audio_path=str(settings.tts_ref_audio_path or ""),
+            prompt_text=settings.tts_prompt_text,
+            prompt_lang=settings.tts_prompt_lang,
+            text_lang=settings.tts_text_lang,
         ),
         cache_dir=settings.tts_cache_dir,
         max_chars=settings.tts_max_chars,
