@@ -223,7 +223,8 @@ def _aliyun_audio_url(response: httpx.Response) -> str:
 def _aliyun_instruction(*, style: str, dialect_hint: str) -> str:
     parts: list[str] = []
     if dialect_hint and dialect_hint.lower() != "neutral":
-        parts.append(f"use {dialect_hint} dialect or accent when appropriate")
+        parts.append(f"请带有{dialect_hint}的口音和语感")
+    parts.append("自然连贯地说，不要逐字停顿")
     if style:
-        parts.append(f"style: {style}")
-    return "; ".join(parts)
+        parts.append(f"语气：{style}")
+    return "；".join(parts)

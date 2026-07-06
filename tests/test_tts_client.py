@@ -132,6 +132,8 @@ async def test_aliyun_cosyvoice_backend_posts_to_speech_synthesizer_and_download
             assert payload["input"]["sample_rate"] == 24000
             assert payload["input"]["language_hints"] == ["zh"]
             assert "southwest" in payload["input"]["instruction"]
+            assert "自然连贯" in payload["input"]["instruction"]
+            assert "不要逐字停顿" in payload["input"]["instruction"]
             assert "parameters" not in payload
             return httpx.Response(
                 200,
