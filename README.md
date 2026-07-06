@@ -48,3 +48,16 @@ container images should live only on the server, not in this repository.
 After someone mentions or replies to the bot in a group, `FOLLOWUP_WINDOW_SECONDS` opens a short
 same-user follow-up window. Messages in that window still need to look addressed to the bot, based
 on `FOLLOWUP_TRIGGER_KEYWORDS` or question marks, before the bot replies.
+
+## Deployment
+
+Pushes to `master` run GitHub Actions CI and deploy to `/opt/qq-rolebot` on the server.
+The deployment preserves server-only runtime files such as `.env`, `data/`, model weights,
+reference audio, and generated voice cache files.
+
+Required GitHub repository secrets:
+
+- `DEPLOY_HOST`
+- `DEPLOY_USER`
+- `DEPLOY_PORT`
+- `DEPLOY_SSH_KEY`

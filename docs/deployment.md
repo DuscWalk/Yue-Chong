@@ -56,6 +56,24 @@ Server-only TTS artifact paths:
 Do not copy model weights, container images, reference audio, converted datasets, or generated
 voice cache files into the local workspace or git repository.
 
+## GitHub Actions deployment
+
+Pushes to `master` run CI and deploy to `/opt/qq-rolebot`.
+
+Required GitHub repository secrets:
+
+- `DEPLOY_HOST`: server host, for example `120.26.110.68`.
+- `DEPLOY_USER`: `root`.
+- `DEPLOY_PORT`: `22`.
+- `DEPLOY_SSH_KEY`: private key whose public half is listed in `/root/.ssh/authorized_keys`.
+
+The deployment script preserves `.env`, `data/`, model files, voice references, and generated
+audio on the server. It does not commit or upload those artifacts to GitHub.
+
+The first deployment converts `/opt/qq-rolebot` from a plain directory into a git checkout. The
+previous directory is moved to `/opt/qq-rolebot.pre-git-<timestamp>` and runtime files are restored
+into the new checkout.
+
 ## 2. Run tests on the server
 
 ```bash
