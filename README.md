@@ -42,7 +42,9 @@ Voice replies are optional and disabled by default. Set `TTS_ENABLED=true` and p
 `TTS_API_URL` at a local TTS HTTP service to allow explicit voice requests. The default
 `TTS_BACKEND=generic` calls `POST /synthesize`; `TTS_BACKEND=gptsovits` calls GPT-SoVITS
 `POST /tts` and uses `TTS_REF_AUDIO_PATH`, `TTS_PROMPT_TEXT`, `TTS_PROMPT_LANG`, and
-`TTS_TEXT_LANG`.
+`TTS_TEXT_LANG`. `TTS_BACKEND=aliyun-cosyvoice` calls Alibaba Cloud Model Studio
+CosyVoice through the DashScope HTTP API, using `TTS_API_KEY`, `TTS_MODEL`,
+`TTS_AUDIO_FORMAT`, `TTS_TEXT_LANG`, and `TTS_SPEAKER` as the Alibaba voice id.
 Large runtime artifacts such as model weights, reference audio, generated voice cache files, and
 container images should live only on the server, not in this repository.
 

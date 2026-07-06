@@ -86,6 +86,9 @@ class Settings:
     tts_style: str
     tts_dialect_hint: str
     tts_backend: str
+    tts_api_key: str
+    tts_model: str
+    tts_audio_format: str
     tts_ref_audio_path: Path | None
     tts_prompt_text: str
     tts_prompt_lang: str
@@ -140,8 +143,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         raise ConfigError("FOLLOWUP_WINDOW_SECONDS must be greater than or equal to 0")
 
     tts_backend = env.get("TTS_BACKEND", "generic").strip().lower() or "generic"
-    if tts_backend not in {"generic", "gptsovits"}:
-        raise ConfigError("TTS_BACKEND must be one of: generic, gptsovits")
+    if tts_backend not in {"generic", "gptsovits", "aliyun-cosyvoice"}:
+        raise ConfigError("TTS_BACKEND must be one of: generic, gptsovits, aliyun-cosyvoice")
+
+    tts_audio_format = env.get("TTS_AUDIO_FORMAT", "wav").strip().lower() or "wav"
+    if tts_audio_format not in {"wav", "mp3"}:
+        raise ConfigError("TTS_AUDIO_FORMAT must be one of: wav, mp3")
 
     raw_tts_ref_audio_path = env.get("TTS_REF_AUDIO_PATH", "").strip()
 
@@ -187,6 +194,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_style=env.get("TTS_STYLE", "calm").strip() or "calm",
         tts_dialect_hint=env.get("TTS_DIALECT_HINT", "neutral").strip() or "neutral",
         tts_backend=tts_backend,
+        tts_api_key=env.get("TTS_API_KEY", "").strip(),
+        tts_model=env.get("TTS_MODEL", "cosyvoice-v2").strip() or "cosyvoice-v2",
+        tts_audio_format=tts_audio_format,
         tts_ref_audio_path=Path(raw_tts_ref_audio_path) if raw_tts_ref_audio_path else None,
         tts_prompt_text=env.get("TTS_PROMPT_TEXT", "").strip(),
         tts_prompt_lang=env.get("TTS_PROMPT_LANG", "zh").strip() or "zh",

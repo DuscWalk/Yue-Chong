@@ -116,3 +116,75 @@ async def test_gptsovits_backend_posts_to_tts_endpoint() -> None:
     assert result.ok is True
     assert result.audio == b"RIFFgptsovits"
     assert result.extension == ".wav"
+
+
+@pytest.mark.asyncio
+async def test_aliyun_cosyvoice_backend_posts_to_speech_synthesizer_and_downloads_audio() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "dashscope.test":
+            payload = json.loads(request.content.decode("utf-8"))
+            assert request.url.path == "/api/v1/services/audio/tts/SpeechSynthesizer"
+            assert request.headers["authorization"] == "Bearer aliyun-key"
+            assert payload["model"] == "cosyvoice-v2"
+            assert payload["input"]["text"] == "你好"
+            assert payload["input"]["voice"] == "chongyue-voice"
+            assert payload["input"]["language_hints"] == ["zh"]
+            assert "southwest" in payload["input"]["instruction"]
+            assert payload["parameters"]["format"] == "mp3"
+            return httpx.Response(
+                200,
+                json={
+                    "output": {
+                        "audio": {
+                            "url": "https://audio.test/generated.mp3",
+                        }
+                    }
+                },
+            )
+
+        if request.url.host == "audio.test":
+            return httpx.Response(200, content=b"ID3audio", headers={"content-type": "audio/mpeg"})
+
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = TTSClient(
+        api_url="https://dashscope.test",
+        timeout_seconds=5,
+        backend="aliyun-cosyvoice",
+        api_key="aliyun-key",
+        model="cosyvoice-v2",
+        audio_format="mp3",
+        text_lang="zh",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.synthesize(
+        text="你好",
+        speaker="chongyue-voice",
+        style="calm",
+        dialect_hint="southwest",
+    )
+
+    assert result.ok is True
+    assert result.audio == b"ID3audio"
+    assert result.extension == ".mp3"
+
+
+@pytest.mark.asyncio
+async def test_aliyun_cosyvoice_backend_requires_api_key() -> None:
+    client = TTSClient(
+        api_url="https://dashscope.test",
+        timeout_seconds=5,
+        backend="aliyun-cosyvoice",
+        transport=httpx.MockTransport(lambda request: httpx.Response(500)),
+    )
+
+    result = await client.synthesize(
+        text="你好",
+        speaker="chongyue-voice",
+        style="calm",
+        dialect_hint="southwest",
+    )
+
+    assert result.ok is False
+    assert "TTS_API_KEY" in result.error

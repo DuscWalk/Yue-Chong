@@ -175,6 +175,25 @@ def test_load_settings_reads_gptsovits_tts_overrides() -> None:
     assert settings.tts_text_lang == "zh"
 
 
+def test_load_settings_reads_aliyun_cosyvoice_tts_overrides() -> None:
+    env = complete_env()
+    env.update(
+        {
+            "TTS_BACKEND": "aliyun-cosyvoice",
+            "TTS_API_KEY": "aliyun-key",
+            "TTS_MODEL": "cosyvoice-v2",
+            "TTS_AUDIO_FORMAT": "mp3",
+        }
+    )
+
+    settings = load_settings(env)
+
+    assert settings.tts_backend == "aliyun-cosyvoice"
+    assert settings.tts_api_key == "aliyun-key"
+    assert settings.tts_model == "cosyvoice-v2"
+    assert settings.tts_audio_format == "mp3"
+
+
 def test_load_settings_rejects_invalid_probability() -> None:
     env = complete_env()
     env["DEFAULT_RANDOM_REPLY_PROBABILITY"] = "101"

@@ -42,9 +42,10 @@ Optional tool settings:
 - `TAVILY_API_KEY` enables Tavily web search.
 - `TOOLS_ENABLE_TIME`, `TOOLS_ENABLE_SEARCH`, and `TOOLS_ENABLE_PERSONA_SOURCES` control tool
   availability.
-- `TTS_ENABLED` and `TTS_API_URL` enable optional voice replies through a local TTS HTTP service.
+- `TTS_ENABLED` and `TTS_API_URL` enable optional voice replies.
 - `TTS_BACKEND=generic` calls `POST /synthesize`; `TTS_BACKEND=gptsovits` calls GPT-SoVITS
-  `POST /tts`.
+  `POST /tts`; `TTS_BACKEND=aliyun-cosyvoice` calls Alibaba Cloud Model Studio CosyVoice
+  through the DashScope HTTP API.
 - `MAX_OUTPUT_CHARS` is a hard safety cap for generated replies. Use `40` for the current short
   chat style, while the persona asks the model to stay around 20 Chinese characters.
 - `FOLLOWUP_WINDOW_SECONDS` and `FOLLOWUP_TRIGGER_KEYWORDS` control short same-user group
@@ -191,6 +192,29 @@ TTS_TIMEOUT_SECONDS=120
 
 `TTS_PROMPT_TEXT` must match the selected authorized reference audio. GPT-SoVITS artifacts stay
 under `/opt/gptsovits`, `/opt/models/gptsovits`, and `/opt/qq-rolebot/data`; do not commit them.
+
+### Optional Alibaba Cloud Model Studio CosyVoice TTS
+
+Create or select a CosyVoice voice in Alibaba Cloud Model Studio, then store only the API key and
+voice id in `/opt/qq-rolebot/.env`:
+
+```dotenv
+TTS_ENABLED=true
+TTS_BACKEND=aliyun-cosyvoice
+TTS_API_URL=https://dashscope.aliyuncs.com
+TTS_API_KEY=
+TTS_MODEL=cosyvoice-v2
+TTS_AUDIO_FORMAT=mp3
+TTS_TEXT_LANG=zh
+TTS_SPEAKER=
+TTS_DIALECT_HINT=southwest
+TTS_TIMEOUT_SECONDS=30
+TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
+```
+
+`TTS_SPEAKER` must be the Alibaba voice id, not a local file path. Generated audio is downloaded
+from the temporary URL returned by DashScope and cached under `TTS_CACHE_DIR`. If the API call or
+audio download fails, the bot falls back to the text reply.
 
 ## 5. First group test
 
