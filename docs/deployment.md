@@ -209,7 +209,8 @@ TTS_MODEL=cosyvoice-v2
 TTS_AUDIO_FORMAT=mp3
 TTS_TEXT_LANG=zh
 TTS_SPEAKER=
-TTS_DIALECT_HINT=southwest
+TTS_STYLE=沉稳自然，武汉话日常短句，连贯不逐字
+TTS_DIALECT_HINT=武汉话
 TTS_TIMEOUT_SECONDS=30
 TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
 ```
