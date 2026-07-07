@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import email
 import glob
+import html
 import imaplib
 import json
 import os
@@ -19,6 +20,7 @@ from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import parseaddr
 from pathlib import Path
+from urllib.parse import quote
 
 OFFLINE_LOG_MARKERS = (
     "bot_offline",
@@ -253,6 +255,9 @@ def build_email_message(
     message["To"] = ", ".join(config.alert_email_to)
     message["Subject"] = subject
     message.set_content(body)
+    html_body = _html_body_with_qr_button(config, subject=subject, body=body)
+    if html_body is not None:
+        message.add_alternative(html_body, subtype="html")
 
     if qr_path is not None:
         message.add_attachment(
@@ -262,6 +267,43 @@ def build_email_message(
             filename="napcat-login-qrcode.png",
         )
     return message
+
+
+def _html_body_with_qr_button(
+    config: WatchdogConfig,
+    *,
+    subject: str,
+    body: str,
+) -> str | None:
+    if "[qr:" not in subject or not config.alert_email_from:
+        return None
+    mailto = _qr_reply_mailto(config.alert_email_from, subject)
+    escaped_body = html.escape(body).replace("\n", "<br>\n")
+    return "\n".join(
+        [
+            "<!doctype html>",
+            "<html>",
+            "<body>",
+            f"<p>{escaped_body}</p>",
+            '<p><a style="display:inline-block;padding:10px 14px;'
+            "background:#2563eb;color:#ffffff;text-decoration:none;"
+            f'border-radius:6px" href="{html.escape(mailto, quote=True)}">'
+            "获取新二维码</a></p>",
+            "<p>If the button does not work, reply to this email with <code>qr</code>.</p>",
+            "</body>",
+            "</html>",
+        ]
+    )
+
+
+def _qr_reply_mailto(address: str, subject: str) -> str:
+    reply_subject = f"Re: {subject}"
+    reply_body = "qr\n"
+    return (
+        f"mailto:{quote(address, safe='@.+-_')}"
+        f"?subject={quote(reply_subject, safe='')}"
+        f"&body={quote(reply_body, safe='')}"
+    )
 
 
 def is_authorized_reply(

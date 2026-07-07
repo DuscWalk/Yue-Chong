@@ -1,4 +1,6 @@
+from html import unescape
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from scripts.napcat_account_watchdog import (
     HealthReport,
@@ -144,6 +146,38 @@ def test_build_email_attaches_qr_without_leaking_secret(tmp_path: Path) -> None:
     raw = message.as_string()
     assert "secret-code" not in raw
     assert "napcat-login-qrcode.png" in raw
+
+
+def test_build_email_adds_mailto_button_for_qr_alert() -> None:
+    config = WatchdogConfig(
+        smtp_user="sender@qq.com",
+        smtp_password="secret-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+
+    message = build_email_message(
+        config,
+        subject="[qq-rolebot] QQ account may be offline [qr:abc123]",
+        body="NapCat needs QR login.",
+    )
+
+    html_part = next(
+        part for part in message.walk() if part.get_content_type() == "text/html"
+    )
+    html = html_part.get_content()
+    assert "获取新二维码" in html
+    assert "secret-code" not in html
+
+    href_start = html.index('href="') + len('href="')
+    href_end = html.index('"', href_start)
+    parsed = urlparse(unescape(html[href_start:href_end]))
+    query = parse_qs(parsed.query)
+
+    assert parsed.scheme == "mailto"
+    assert parsed.path == "sender@qq.com"
+    assert query["subject"] == ["Re: [qq-rolebot] QQ account may be offline [qr:abc123]"]
+    assert query["body"] == ["qr\n"]
 
 
 def test_authorized_reply_matches_sender_and_token() -> None:

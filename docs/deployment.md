@@ -387,9 +387,14 @@ TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
 ## 10. NapCat Account Watchdog
 
 The watchdog is a separate one-shot script run by systemd timer. It checks the bot service, NapCat
-service, bot TCP port, and recent NapCat logs. When the account appears offline, it sends a QQ Mail
-alert and attaches the newest fresh QR image when available. If the administrator replies to the
-alert later, the watchdog can refresh NapCat and send a new QR email.
+service, bot TCP port, OneBot reverse WebSocket connection, and recent NapCat logs. When the account
+appears offline, it sends a QQ Mail alert and attaches the newest fresh QR image when available. If
+the administrator replies to the alert later, the watchdog can refresh NapCat and send a new QR
+email.
+
+HTML-capable mail clients also show a `获取新二维码` button. The button opens a prefilled reply
+draft through `mailto:`; the administrator still sends the email, and the watchdog authorizes that
+reply through the same IMAP sender and token checks.
 
 Create `/opt/qq-rolebot/.watchdog.env` on the server. This file is server-only and must be mode
 `600`.
