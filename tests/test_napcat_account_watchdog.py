@@ -1,3 +1,4 @@
+import json
 from html import unescape
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -5,15 +6,18 @@ from urllib.parse import parse_qs, urlparse
 from scripts.napcat_account_watchdog import (
     HealthReport,
     MailReply,
+    QrClickResult,
     WatchdogConfig,
     WatchdogDependencies,
     build_email_message,
     decide_status_email,
     evaluate_health,
     find_fresh_qr,
+    handle_qr_click,
     is_authorized_reply,
     load_config,
     onebot_connection_from_ss,
+    qr_click_token_from_path,
     run_watchdog,
 )
 
@@ -41,6 +45,32 @@ def test_load_config_can_disable_onebot_connection_requirement() -> None:
     config = load_config({"WATCHDOG_REQUIRE_ONEBOT_CONNECTION": "false"})
 
     assert config.watchdog_require_onebot_connection is False
+
+
+def test_load_config_parses_click_webhook_settings() -> None:
+    config = load_config(
+        {
+            "WATCHDOG_CLICK_PUBLIC_BASE_URL": "https://bot.example.com",
+            "WATCHDOG_CLICK_HOST": "0.0.0.0",
+            "WATCHDOG_CLICK_PORT": "18081",
+            "WATCHDOG_CLICK_PATH_PREFIX": "/qr",
+            "WATCHDOG_CLICK_TOKEN_TTL_SECONDS": "3600",
+        }
+    )
+
+    assert config.watchdog_click_public_base_url == "https://bot.example.com"
+    assert config.watchdog_click_host == "0.0.0.0"
+    assert config.watchdog_click_port == 18081
+    assert config.watchdog_click_path_prefix == "/qr"
+    assert config.watchdog_click_token_ttl_seconds == 3600
+
+
+def test_qr_click_token_from_path_matches_configured_prefix() -> None:
+    config = WatchdogConfig(watchdog_click_path_prefix="/qr")
+
+    assert qr_click_token_from_path(config, "/qr/abc-123?utm=mail") == "abc-123"
+    assert qr_click_token_from_path(config, "/wrong/abc-123") == ""
+    assert qr_click_token_from_path(config, "/qr/abc-123/extra") == ""
 
 
 def test_evaluate_health_reports_each_failed_signal() -> None:
@@ -180,6 +210,34 @@ def test_build_email_adds_mailto_button_for_qr_alert() -> None:
     assert query["body"] == ["qr\n"]
 
 
+def test_build_email_prefers_click_link_when_public_base_url_is_configured() -> None:
+    config = WatchdogConfig(
+        smtp_user="sender@qq.com",
+        smtp_password="secret-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+        watchdog_click_public_base_url="https://bot.example.com/base/",
+        watchdog_click_path_prefix="/qr",
+    )
+
+    message = build_email_message(
+        config,
+        subject="[qq-rolebot] QQ account may be offline [qr:abc123]",
+        body="NapCat needs QR login.",
+    )
+
+    plain = next(part for part in message.walk() if part.get_content_type() == "text/plain")
+    html_part = next(
+        part for part in message.walk() if part.get_content_type() == "text/html"
+    )
+    html = html_part.get_content()
+
+    assert "secret-code" not in message.as_string()
+    assert "mailto:" not in html
+    assert "https://bot.example.com/base/qr/abc123" in plain.get_content()
+    assert "https://bot.example.com/base/qr/abc123" in html
+
+
 def test_authorized_reply_matches_sender_and_token() -> None:
     config = WatchdogConfig(
         watchdog_reply_allowed_senders=["admin@example.com"],
@@ -226,7 +284,7 @@ def test_run_watchdog_sends_offline_email_once(tmp_path: Path) -> None:
         send_email=lambda cfg, message: sent.append(message),
         read_replies=lambda cfg: [],
         run_refresh_command=lambda cfg: 0,
-        now=lambda: qr.stat().st_mtime + 1,
+        now=lambda: 120.0,
         token_factory=lambda: "abc123",
         sleep=lambda seconds: None,
         log=lambda message: None,
@@ -239,6 +297,45 @@ def test_run_watchdog_sends_offline_email_once(tmp_path: Path) -> None:
     assert second.status == "unhealthy"
     assert len(sent) == 1
     assert "[qr:abc123]" in sent[0]["Subject"]
+
+
+def test_run_watchdog_records_token_timestamp_for_click_links(tmp_path: Path) -> None:
+    qr = tmp_path / "qrcode.png"
+    qr.write_bytes(b"fake-png")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"status":"healthy","active_qr_token":"old"}',
+        encoding="utf-8",
+    )
+    sent = []
+    config = WatchdogConfig(
+        watchdog_state_path=str(state_path),
+        watchdog_qr_path=str(qr),
+        watchdog_click_public_base_url="https://bot.example.com",
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: False,
+        tcp_connect=lambda host, port: False,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 123.0,
+        token_factory=lambda: "new-click-token",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    run_watchdog(config, deps)
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["active_qr_token"] == "new-click-token"
+    assert state["active_qr_token_timestamp"] == 123
+    assert "https://bot.example.com/watchdog/qr/new-click-token" in sent[0].as_string()
 
 
 def test_run_watchdog_sends_recovery_email_after_unhealthy(tmp_path: Path) -> None:
@@ -345,7 +442,7 @@ def test_run_watchdog_reply_sends_fresh_qr_and_marks_uid(tmp_path: Path) -> None
         send_email=lambda cfg, message: sent.append(message),
         read_replies=lambda cfg: [reply],
         run_refresh_command=lambda cfg: refreshes.append(cfg.watchdog_qr_refresh_command) or 0,
-        now=lambda: qr.stat().st_mtime + 1,
+        now=lambda: 120.0,
         token_factory=lambda: "abc123",
         sleep=lambda seconds: None,
         log=lambda message: None,
@@ -357,3 +454,149 @@ def test_run_watchdog_reply_sends_fresh_qr_and_marks_uid(tmp_path: Path) -> None
     assert len(sent) == 1
     assert sent[0]["Subject"] == "[qq-rolebot] Fresh QQ login QR [qr:abc123]"
     assert '"42"' in state_path.read_text(encoding="utf-8")
+
+
+def test_handle_qr_click_rejects_invalid_token(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"status":"unhealthy","active_qr_token":"abc123","active_qr_token_timestamp":100}',
+        encoding="utf-8",
+    )
+    sent = []
+    refreshes = []
+    config = WatchdogConfig(
+        watchdog_state_path=str(state_path),
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: refreshes.append(cfg.watchdog_qr_refresh_command) or 0,
+        now=lambda: 120.0,
+        token_factory=lambda: "unused",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    result = handle_qr_click(config, "wrong-token", deps)
+
+    assert result == QrClickResult(status="invalid", email_sent=False)
+    assert sent == []
+    assert refreshes == []
+
+
+def test_handle_qr_click_rejects_expired_token(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"status":"unhealthy","active_qr_token":"abc123","active_qr_token_timestamp":100}',
+        encoding="utf-8",
+    )
+    sent = []
+    config = WatchdogConfig(
+        watchdog_state_path=str(state_path),
+        watchdog_click_token_ttl_seconds=10,
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 120.0,
+        token_factory=lambda: "unused",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    result = handle_qr_click(config, "abc123", deps)
+
+    assert result == QrClickResult(status="expired", email_sent=False)
+    assert sent == []
+
+
+def test_handle_qr_click_sends_fresh_qr_and_records_timestamp(tmp_path: Path) -> None:
+    qr = tmp_path / "qrcode.png"
+    qr.write_bytes(b"fake-png")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"status":"unhealthy","active_qr_token":"abc123","active_qr_token_timestamp":100}',
+        encoding="utf-8",
+    )
+    sent = []
+    refreshes = []
+    config = WatchdogConfig(
+        watchdog_state_path=str(state_path),
+        watchdog_qr_path=str(qr),
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: refreshes.append(cfg.watchdog_qr_refresh_command) or 0,
+        now=lambda: 120.0,
+        token_factory=lambda: "unused",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    result = handle_qr_click(config, "abc123", deps)
+
+    assert result == QrClickResult(status="sent", email_sent=True)
+    assert refreshes == ["systemctl restart napcat.service"]
+    assert len(sent) == 1
+    assert sent[0]["Subject"] == "[qq-rolebot] Fresh QQ login QR [qr:abc123]"
+    assert '"last_qr_click_timestamp"' in state_path.read_text(encoding="utf-8")
+
+
+def test_handle_qr_click_respects_cooldown(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"status":"unhealthy","active_qr_token":"abc123",'
+        '"active_qr_token_timestamp":100,"last_qr_click_timestamp":115}',
+        encoding="utf-8",
+    )
+    sent = []
+    refreshes = []
+    config = WatchdogConfig(
+        watchdog_state_path=str(state_path),
+        watchdog_qr_reply_cooldown_seconds=60,
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: refreshes.append(cfg.watchdog_qr_refresh_command) or 0,
+        now=lambda: 120.0,
+        token_factory=lambda: "unused",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    result = handle_qr_click(config, "abc123", deps)
+
+    assert result == QrClickResult(status="throttled", email_sent=False)
+    assert sent == []
+    assert refreshes == []

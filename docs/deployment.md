@@ -417,6 +417,11 @@ WATCHDOG_REPLY_ENABLED=true
 WATCHDOG_REPLY_ALLOWED_SENDERS=admin@example.com
 WATCHDOG_REPLY_KEYWORDS=qr,qrcode,二维码,扫码,登录
 WATCHDOG_QR_REPLY_COOLDOWN_SECONDS=60
+WATCHDOG_CLICK_PUBLIC_BASE_URL=
+WATCHDOG_CLICK_HOST=127.0.0.1
+WATCHDOG_CLICK_PORT=18081
+WATCHDOG_CLICK_PATH_PREFIX=/watchdog/qr
+WATCHDOG_CLICK_TOKEN_TTL_SECONDS=86400
 
 SMTP_HOST=smtp.qq.com
 SMTP_PORT=465
@@ -476,12 +481,55 @@ sudo systemctl start napcat-account-watchdog.service
 sudo journalctl -u napcat-account-watchdog -n 80 --no-pager -l
 ```
 
+Optional one-click QR button service:
+
+```ini
+[Unit]
+Description=NapCat QR Click Webhook
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/qq-rolebot
+EnvironmentFile=/opt/qq-rolebot/.watchdog.env
+ExecStart=/opt/miniconda3/envs/qq-rolebot/bin/python /opt/qq-rolebot/scripts/napcat_account_watchdog.py --serve-click-webhook
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+```
+
+For a quick HTTP trial without a reverse proxy, set:
+
+```dotenv
+WATCHDOG_CLICK_PUBLIC_BASE_URL=http://SERVER_PUBLIC_IP:18081
+WATCHDOG_CLICK_HOST=0.0.0.0
+WATCHDOG_CLICK_PORT=18081
+WATCHDOG_CLICK_PATH_PREFIX=/watchdog/qr
+```
+
+Then enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now napcat-qr-click.service
+sudo systemctl status napcat-qr-click --no-pager -l
+```
+
+For long-term use, put the click service behind HTTPS and set
+`WATCHDOG_CLICK_PUBLIC_BASE_URL` to that HTTPS origin. Keep the rolebot OneBot endpoint on
+`127.0.0.1:8080`; do not expose it for this button.
+
 Manual verification:
 
 ```bash
 sudo systemctl status napcat-account-watchdog.timer --no-pager -l
+sudo systemctl status napcat-qr-click --no-pager -l
 sudo bash -lc 'set -a; . /opt/qq-rolebot/.watchdog.env; set +a; WATCHDOG_PORT=18080 /opt/miniconda3/envs/qq-rolebot/bin/python /opt/qq-rolebot/scripts/napcat_account_watchdog.py'
 sudo journalctl -u napcat-account-watchdog -n 80 --no-pager -l
+sudo journalctl -u napcat-qr-click -n 80 --no-pager -l
 ```
 
 The QR attachment is sensitive login material. Do not copy it into git, paste it into public logs,

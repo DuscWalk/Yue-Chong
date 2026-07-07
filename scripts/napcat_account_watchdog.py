@@ -4,6 +4,7 @@ from __future__ import annotations
 import email
 import glob
 import html
+import http.server
 import imaplib
 import json
 import os
@@ -20,7 +21,7 @@ from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import parseaddr
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 OFFLINE_LOG_MARKERS = (
     "bot_offline",
@@ -57,6 +58,11 @@ class WatchdogConfig:
     watchdog_reply_keywords: list[str] = field(
         default_factory=lambda: ["qr", "qrcode", "二维码", "扫码", "登录"]
     )
+    watchdog_click_public_base_url: str = ""
+    watchdog_click_host: str = "127.0.0.1"
+    watchdog_click_port: int = 18081
+    watchdog_click_path_prefix: str = "/watchdog/qr"
+    watchdog_click_token_ttl_seconds: int = 86400
     smtp_host: str = "smtp.qq.com"
     smtp_port: int = 465
     smtp_ssl: bool = True
@@ -83,6 +89,12 @@ class MailReply:
     sender: str
     subject: str
     body: str
+
+
+@dataclass(frozen=True, slots=True)
+class QrClickResult:
+    status: str
+    email_sent: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +133,13 @@ def _csv(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _normalize_path_prefix(value: str | None) -> str:
+    prefix = (value or "/watchdog/qr").strip() or "/watchdog/qr"
+    if not prefix.startswith("/"):
+        prefix = f"/{prefix}"
+    return prefix.rstrip("/") or "/watchdog/qr"
+
+
 def load_config(env: Mapping[str, str]) -> WatchdogConfig:
     smtp_user = env.get("SMTP_USER", "")
     return WatchdogConfig(
@@ -150,6 +169,16 @@ def load_config(env: Mapping[str, str]) -> WatchdogConfig:
         watchdog_reply_allowed_senders=_csv(env.get("WATCHDOG_REPLY_ALLOWED_SENDERS")),
         watchdog_reply_keywords=_csv(env.get("WATCHDOG_REPLY_KEYWORDS"))
         or ["qr", "qrcode", "二维码", "扫码", "登录"],
+        watchdog_click_public_base_url=env.get("WATCHDOG_CLICK_PUBLIC_BASE_URL", ""),
+        watchdog_click_host=env.get("WATCHDOG_CLICK_HOST", "127.0.0.1"),
+        watchdog_click_port=_int(env.get("WATCHDOG_CLICK_PORT"), 18081),
+        watchdog_click_path_prefix=_normalize_path_prefix(
+            env.get("WATCHDOG_CLICK_PATH_PREFIX", "/watchdog/qr")
+        ),
+        watchdog_click_token_ttl_seconds=_int(
+            env.get("WATCHDOG_CLICK_TOKEN_TTL_SECONDS"),
+            86400,
+        ),
         smtp_host=env.get("SMTP_HOST", "smtp.qq.com"),
         smtp_port=_int(env.get("SMTP_PORT"), 465),
         smtp_ssl=_bool(env.get("SMTP_SSL"), True),
@@ -254,7 +283,7 @@ def build_email_message(
     message["From"] = config.alert_email_from
     message["To"] = ", ".join(config.alert_email_to)
     message["Subject"] = subject
-    message.set_content(body)
+    message.set_content(_plain_body_with_qr_link(config, subject=subject, body=body))
     html_body = _html_body_with_qr_button(config, subject=subject, body=body)
     if html_body is not None:
         message.add_alternative(html_body, subtype="html")
@@ -269,15 +298,39 @@ def build_email_message(
     return message
 
 
+def _plain_body_with_qr_link(
+    config: WatchdogConfig,
+    *,
+    subject: str,
+    body: str,
+) -> str:
+    url = _qr_click_url(config, subject)
+    if url is None:
+        return body
+    return "\n".join(
+        [
+            body.rstrip(),
+            "",
+            "Open this link to request a fresh QQ login QR code:",
+            url,
+            "",
+            "If the link does not work, reply to this email with qr.",
+        ]
+    )
+
+
 def _html_body_with_qr_button(
     config: WatchdogConfig,
     *,
     subject: str,
     body: str,
 ) -> str | None:
-    if "[qr:" not in subject or not config.alert_email_from:
-        return None
-    mailto = _qr_reply_mailto(config.alert_email_from, subject)
+    url = _qr_click_url(config, subject)
+    fallback = "If the button does not work, reply to this email with <code>qr</code>."
+    if url is None:
+        if "[qr:" not in subject or not config.alert_email_from:
+            return None
+        url = _qr_reply_mailto(config.alert_email_from, subject)
     escaped_body = html.escape(body).replace("\n", "<br>\n")
     return "\n".join(
         [
@@ -287,13 +340,46 @@ def _html_body_with_qr_button(
             f"<p>{escaped_body}</p>",
             '<p><a style="display:inline-block;padding:10px 14px;'
             "background:#2563eb;color:#ffffff;text-decoration:none;"
-            f'border-radius:6px" href="{html.escape(mailto, quote=True)}">'
+            f'border-radius:6px" href="{html.escape(url, quote=True)}">'
             "获取新二维码</a></p>",
-            "<p>If the button does not work, reply to this email with <code>qr</code>.</p>",
+            f"<p>{fallback}</p>",
             "</body>",
             "</html>",
         ]
     )
+
+
+def _qr_click_url(config: WatchdogConfig, subject: str) -> str | None:
+    token = _qr_token_from_subject(subject)
+    if not token or not config.watchdog_click_public_base_url:
+        return None
+    base_url = config.watchdog_click_public_base_url.rstrip("/")
+    path_prefix = _normalize_path_prefix(config.watchdog_click_path_prefix)
+    return f"{base_url}{path_prefix}/{quote(token, safe='')}"
+
+
+def _qr_token_from_subject(subject: str) -> str:
+    marker = "[qr:"
+    start = subject.find(marker)
+    if start < 0:
+        return ""
+    start += len(marker)
+    end = subject.find("]", start)
+    if end < 0:
+        return ""
+    return subject[start:end].strip()
+
+
+def qr_click_token_from_path(config: WatchdogConfig, request_target: str) -> str:
+    path = urlsplit(request_target).path
+    prefix = _normalize_path_prefix(config.watchdog_click_path_prefix)
+    token_prefix = f"{prefix}/"
+    if not path.startswith(token_prefix):
+        return ""
+    token = unquote(path[len(token_prefix) :])
+    if not token or "/" in token:
+        return ""
+    return token
 
 
 def _qr_reply_mailto(address: str, subject: str) -> str:
@@ -418,6 +504,133 @@ def _reply_qr_body(qr_path: Path | None) -> str:
     return "The server tried to refresh the QR code, but no fresh QR image was available."
 
 
+def handle_qr_click(
+    config: WatchdogConfig,
+    token: str,
+    deps: WatchdogDependencies,
+) -> QrClickResult:
+    state_path = Path(config.watchdog_state_path)
+    state = load_state(state_path)
+    active_token = str(state.get("active_qr_token") or "")
+    if not token or not active_token or not secrets.compare_digest(token, active_token):
+        return QrClickResult(status="invalid", email_sent=False)
+
+    now = int(deps.now())
+    token_timestamp = int(
+        state.get("active_qr_token_timestamp")
+        or state.get("last_alert_timestamp")
+        or 0
+    )
+    if (
+        config.watchdog_click_token_ttl_seconds > 0
+        and token_timestamp > 0
+        and now - token_timestamp > config.watchdog_click_token_ttl_seconds
+    ):
+        return QrClickResult(status="expired", email_sent=False)
+
+    last_click = int(state.get("last_qr_click_timestamp") or 0)
+    if (
+        last_click > 0
+        and now - last_click < config.watchdog_qr_reply_cooldown_seconds
+    ):
+        return QrClickResult(status="throttled", email_sent=False)
+
+    qr_path = _fresh_qr_after_optional_refresh(config, deps, force_refresh=True)
+    sent = _send_if_configured(
+        config,
+        deps,
+        subject=f"[qq-rolebot] Fresh QQ login QR [qr:{active_token}]",
+        body=_reply_qr_body(qr_path),
+        qr_path=qr_path,
+    )
+    if sent:
+        state["last_qr_click_timestamp"] = now
+        save_state(state_path, state)
+        return QrClickResult(status="sent", email_sent=True)
+    return QrClickResult(status="failed", email_sent=False)
+
+
+def _qr_click_http_status(result: QrClickResult, *, path_matched: bool) -> int:
+    if not path_matched:
+        return 404
+    return {
+        "sent": 200,
+        "throttled": 429,
+        "expired": 410,
+        "invalid": 403,
+        "failed": 500,
+    }.get(result.status, 500)
+
+
+def _qr_click_response_html(result: QrClickResult, *, path_matched: bool) -> bytes:
+    if not path_matched:
+        title = "Link not found"
+        message = "This watchdog link was not recognized."
+    else:
+        title, message = {
+            "sent": (
+                "QR email requested",
+                "A fresh QQ login QR email has been sent to the administrator mailbox.",
+            ),
+            "throttled": (
+                "Already requested",
+                "A QR email was requested recently. Please check the mailbox first.",
+            ),
+            "expired": (
+                "Link expired",
+                "This watchdog link has expired. Reply to the alert email with qr.",
+            ),
+            "invalid": (
+                "Invalid link",
+                "This watchdog link is invalid or no longer active.",
+            ),
+        }.get(
+            result.status,
+            (
+                "Request failed",
+                "The server could not send the QR email. Please check watchdog logs.",
+            ),
+        )
+    html_body = (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        f"<title>{html.escape(title)}</title>"
+        "</head><body>"
+        f"<h1>{html.escape(title)}</h1>"
+        f"<p>{html.escape(message)}</p>"
+        "</body></html>"
+    )
+    return html_body.encode("utf-8")
+
+
+def serve_qr_click_webhook(config: WatchdogConfig, deps: WatchdogDependencies) -> None:
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            token = qr_click_token_from_path(config, self.path)
+            path_matched = bool(token)
+            result = (
+                handle_qr_click(config, token, deps)
+                if path_matched
+                else QrClickResult(status="invalid", email_sent=False)
+            )
+            payload = _qr_click_response_html(result, path_matched=path_matched)
+            self.send_response(_qr_click_http_status(result, path_matched=path_matched))
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format: str, *args: object) -> None:
+            deps.log(f"watchdog click request from {self.client_address[0]}")
+
+    address = (config.watchdog_click_host, config.watchdog_click_port)
+    with http.server.ThreadingHTTPServer(address, Handler) as server:
+        deps.log(
+            "watchdog click server listening on "
+            f"{config.watchdog_click_host}:{config.watchdog_click_port}"
+        )
+        server.serve_forever()
+
+
 def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthReport:
     state_path = Path(config.watchdog_state_path)
     state = load_state(state_path)
@@ -433,7 +646,12 @@ def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthRe
 
     token = str(state.get("active_qr_token") or deps.token_factory())
     if report.status == "unhealthy":
+        if config.watchdog_click_public_base_url and not state.get(
+            "active_qr_token_timestamp"
+        ):
+            token = deps.token_factory()
         state["active_qr_token"] = token
+        state.setdefault("active_qr_token_timestamp", int(deps.now()))
 
     email_kind = decide_status_email(
         state,
@@ -657,16 +875,25 @@ def default_dependencies() -> WatchdogDependencies:
         read_replies=read_imap_replies,
         run_refresh_command=run_refresh_command,
         now=time.time,
-        token_factory=lambda: secrets.token_hex(3),
+        token_factory=lambda: secrets.token_urlsafe(18),
         sleep=time.sleep,
         log=lambda message: print(message, file=sys.stderr),
         onebot_connected=onebot_connected,
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     config = load_config(os.environ)
-    report = run_watchdog(config, default_dependencies())
+    deps = default_dependencies()
+    if argv == ["--serve-click-webhook"]:
+        serve_qr_click_webhook(config, deps)
+        return 0
+    if argv:
+        print("usage: napcat_account_watchdog.py [--serve-click-webhook]", file=sys.stderr)
+        return 2
+
+    report = run_watchdog(config, deps)
     print(f"status={report.status}")
     for reason in report.reasons:
         print(f"reason={reason}")
