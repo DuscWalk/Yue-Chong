@@ -13,6 +13,19 @@ timestamp() {
   date +%Y%m%d%H%M%S
 }
 
+git_network() {
+  local attempt
+  for attempt in 1 2 3; do
+    if git -c http.version=HTTP/1.1 "$@"; then
+      return 0
+    fi
+    if [[ "$attempt" -lt 3 ]]; then
+      sleep $((attempt * 5))
+    fi
+  done
+  return 1
+}
+
 require_safe_app_dir() {
   if [[ "$APP_DIR" != "/opt/qq-rolebot" ]]; then
     echo "Refusing to deploy to unexpected APP_DIR=$APP_DIR" >&2
@@ -28,22 +41,51 @@ restore_runtime_files() {
     chmod 600 "$APP_DIR/.env" || true
   fi
 
-  if [[ -d "$backup_dir/data" && ! -d "$APP_DIR/data" ]]; then
-    mv "$backup_dir/data" "$APP_DIR/data"
-  fi
+  local runtime_dir
+  for runtime_dir in data voice_refs voice_cache models; do
+    if [[ -d "$backup_dir/$runtime_dir" && ! -d "$APP_DIR/$runtime_dir" ]]; then
+      mv "$backup_dir/$runtime_dir" "$APP_DIR/$runtime_dir"
+    fi
+  done
 
   mkdir -p "$APP_DIR/data"
 }
 
+deploy_archive() {
+  local archive_path="$1"
+  require_safe_app_dir
+
+  local backup_dir="/opt/qq-rolebot.pre-archive-$(timestamp)"
+  local release_dir="/opt/qq-rolebot.release-$(timestamp)"
+  mkdir -p "$release_dir"
+  tar -xzf "$archive_path" -C "$release_dir"
+
+  if [[ -e "$APP_DIR" ]]; then
+    mv "$APP_DIR" "$backup_dir"
+  fi
+  mv "$release_dir" "$APP_DIR"
+
+  if [[ -d "$backup_dir" ]]; then
+    restore_runtime_files "$backup_dir"
+  else
+    mkdir -p "$APP_DIR/data"
+  fi
+}
+
 checkout_code() {
   require_safe_app_dir
+
+  if [[ -f "$REPO_URL" ]]; then
+    deploy_archive "$REPO_URL"
+    return
+  fi
 
   if [[ -d "$APP_DIR/.git" ]]; then
     cd "$APP_DIR"
     git reset --hard
     git clean -fd -e .env -e data/ -e voice_refs/ -e voice_cache/ -e models/
     git remote set-url origin "$REPO_URL"
-    git fetch --prune origin "$BRANCH"
+    git_network fetch --prune origin "$BRANCH"
     git checkout -B "$BRANCH" "origin/$BRANCH"
     git reset --hard "$TARGET_SHA"
     git clean -fd -e .env -e data/ -e voice_refs/ -e voice_cache/ -e models/
@@ -55,10 +97,10 @@ checkout_code() {
     mv "$APP_DIR" "$backup_dir"
   fi
 
-  git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+  git_network clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
   cd "$APP_DIR"
   if ! git cat-file -e "$TARGET_SHA^{commit}" 2>/dev/null; then
-    git fetch origin "$BRANCH"
+    git_network fetch origin "$BRANCH"
   fi
   git reset --hard "$TARGET_SHA"
 

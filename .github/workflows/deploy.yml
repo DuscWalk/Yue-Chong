@@ -17,7 +17,7 @@ jobs:
 
     env:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-      REPO_URL: https://github.com/DuscWalk/Yue-Chong.git
+      SOURCE_ARCHIVE: qq-rolebot-source-${{ github.sha }}.tar.gz
       DEPLOY_BRANCH: master
 
     steps:
@@ -47,14 +47,23 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "$DEPLOY_PORT" -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Create source archive
+        run: git archive --format=tar.gz --output "$SOURCE_ARCHIVE" HEAD
+
       - name: Upload deploy script
         run: |
           scp -P "$DEPLOY_PORT" -i ~/.ssh/deploy_key \
             scripts/deploy_server.sh \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/qq-rolebot-deploy.sh"
 
+      - name: Upload source archive
+        run: |
+          scp -P "$DEPLOY_PORT" -i ~/.ssh/deploy_key \
+            "$SOURCE_ARCHIVE" \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/$SOURCE_ARCHIVE"
+
       - name: Deploy on server
         run: |
           ssh -p "$DEPLOY_PORT" -i ~/.ssh/deploy_key \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "bash /tmp/qq-rolebot-deploy.sh '$REPO_URL' '$DEPLOY_BRANCH' '${{ github.sha }}'"
+            "bash /tmp/qq-rolebot-deploy.sh '/tmp/$SOURCE_ARCHIVE' '$DEPLOY_BRANCH' '${{ github.sha }}'"
