@@ -123,10 +123,21 @@ def extract_message_text(event: MessageEvent) -> str:
 
 
 def is_at_bot(event: GroupMessageEvent, bot_id: int) -> bool:
+    if bool(getattr(event, "to_me", False)):
+        return True
     for segment in event.message:
         if segment.type == "at" and str(segment.data.get("qq")) == str(bot_id):
             return True
     return False
+
+
+def is_reply_to_bot(event: MessageEvent, bot_id: int) -> bool:
+    reply = getattr(event, "reply", None)
+    sender = getattr(reply, "sender", None)
+    sender_id = getattr(sender, "user_id", None)
+    if sender_id is not None:
+        return str(sender_id) == str(bot_id)
+    return bool(getattr(event, "to_me", False)) and is_reply_to(getattr(event, "message", []))
 
 
 def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage | None:
@@ -156,7 +167,7 @@ def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage 
             nickname=nickname,
             text=text,
             is_at_bot=is_at_bot(event, bot_id),
-            is_reply_to_bot=is_reply_to(getattr(event, "message", [])),
+            is_reply_to_bot=is_reply_to_bot(event, bot_id),
             created_at=int(getattr(event, "time", int(time.time()))),
         )
 

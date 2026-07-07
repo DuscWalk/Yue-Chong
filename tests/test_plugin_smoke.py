@@ -70,6 +70,7 @@ def test_plugin_marks_reply_to_bot(monkeypatch) -> None:
             SimpleNamespace(type="reply", data={"id": "123"}),
             SimpleNamespace(type="text", data={"text": "today news"}),
         ],
+        reply=SimpleNamespace(sender=SimpleNamespace(user_id=10001)),
         get_plaintext=lambda: "today news",
     )
 
@@ -77,6 +78,50 @@ def test_plugin_marks_reply_to_bot(monkeypatch) -> None:
 
     assert incoming.is_reply_to_bot is True
     assert incoming.text == "today news"
+
+
+def test_plugin_uses_nonebot_to_me_after_at_segment_removed(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    event = SimpleNamespace(
+        message_type="group",
+        group_id=20,
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy", card=""),
+        time=123,
+        to_me=True,
+        message=[
+            SimpleNamespace(type="text", data={"text": "hello"}),
+        ],
+        get_plaintext=lambda: "hello",
+    )
+
+    incoming = module.build_incoming_message(event, bot_id=10001)
+
+    assert incoming.is_at_bot is True
+
+
+def test_plugin_does_not_mark_reply_to_other_user_as_reply_to_bot(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    event = SimpleNamespace(
+        message_type="group",
+        group_id=20,
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy", card=""),
+        time=123,
+        to_me=False,
+        message=[
+            SimpleNamespace(type="reply", data={"id": "123"}),
+            SimpleNamespace(type="text", data={"text": "not for bot"}),
+        ],
+        reply=SimpleNamespace(sender=SimpleNamespace(user_id=12345)),
+        get_plaintext=lambda: "not for bot",
+    )
+
+    incoming = module.build_incoming_message(event, bot_id=10001)
+
+    assert incoming.is_reply_to_bot is False
 
 
 def test_roleplay_plugin_builds_tool_runner(monkeypatch) -> None:
