@@ -41,6 +41,7 @@ class WatchdogConfig:
     watchdog_napcat_service: str = "napcat.service"
     watchdog_host: str = "127.0.0.1"
     watchdog_port: int = 8080
+    watchdog_require_onebot_connection: bool = True
     watchdog_log_window_minutes: int = 10
     watchdog_state_path: str = "/opt/qq-rolebot/data/account_watchdog_state.json"
     watchdog_send_recovery: bool = True
@@ -94,6 +95,7 @@ class WatchdogDependencies:
     token_factory: Callable[[], str]
     sleep: Callable[[float], None]
     log: Callable[[str], None]
+    onebot_connected: Callable[[WatchdogConfig], bool] = lambda config: True
 
 
 def _bool(value: str | None, default: bool) -> bool:
@@ -124,6 +126,10 @@ def load_config(env: Mapping[str, str]) -> WatchdogConfig:
         watchdog_napcat_service=env.get("WATCHDOG_NAPCAT_SERVICE", "napcat.service"),
         watchdog_host=env.get("WATCHDOG_HOST", "127.0.0.1"),
         watchdog_port=_int(env.get("WATCHDOG_PORT"), 8080),
+        watchdog_require_onebot_connection=_bool(
+            env.get("WATCHDOG_REQUIRE_ONEBOT_CONNECTION"),
+            True,
+        ),
         watchdog_log_window_minutes=_int(env.get("WATCHDOG_LOG_WINDOW_MINUTES"), 10),
         watchdog_state_path=env.get(
             "WATCHDOG_STATE_PATH",
@@ -166,6 +172,7 @@ def evaluate_health(
     bot_active: bool,
     napcat_active: bool,
     tcp_ok: bool,
+    onebot_connected: bool = True,
     recent_logs: str,
 ) -> HealthReport:
     reasons: list[str] = []
@@ -175,6 +182,8 @@ def evaluate_health(
         reasons.append(f"{config.watchdog_napcat_service} is not active")
     if not tcp_ok:
         reasons.append(f"{config.watchdog_host}:{config.watchdog_port} is not reachable")
+    if config.watchdog_require_onebot_connection and not onebot_connected:
+        reasons.append("OneBot reverse WebSocket is not connected")
     if any(marker in recent_logs for marker in OFFLINE_LOG_MARKERS):
         reasons.append("NapCat offline/login-expired marker found")
     if any(marker in recent_logs for marker in MANUAL_LOGIN_LOG_MARKERS):
@@ -376,6 +385,7 @@ def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthRe
         bot_active=deps.service_is_active(config.watchdog_bot_service),
         napcat_active=deps.service_is_active(config.watchdog_napcat_service),
         tcp_ok=deps.tcp_connect(config.watchdog_host, config.watchdog_port),
+        onebot_connected=deps.onebot_connected(config),
         recent_logs=recent_logs,
     )
 
@@ -456,6 +466,47 @@ def tcp_connect(host: str, port: int) -> bool:
             return True
     except OSError:
         return False
+
+
+def _endpoint_matches(endpoint: str, host: str, port: int) -> bool:
+    endpoint = endpoint.strip("[]")
+    if not endpoint.endswith(f":{port}"):
+        return False
+    if host in {"0.0.0.0", "::"}:
+        return True
+    return endpoint.startswith(f"{host}:") or endpoint.startswith(f"[{host}]:")
+
+
+def onebot_connection_from_ss(output: str, host: str, port: int) -> bool:
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 5 or parts[0] != "ESTAB":
+            continue
+        local_endpoint = parts[3]
+        peer_endpoint = parts[4]
+        if _endpoint_matches(local_endpoint, host, port) or _endpoint_matches(
+            peer_endpoint,
+            host,
+            port,
+        ):
+            return True
+    return False
+
+
+def onebot_connected(config: WatchdogConfig) -> bool:
+    result = subprocess.run(
+        ["ss", "-H", "-tnp"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        errors="replace",
+    )
+    return onebot_connection_from_ss(
+        result.stdout or "",
+        config.watchdog_host,
+        config.watchdog_port,
+    )
 
 
 def read_recent_logs(config: WatchdogConfig) -> str:
@@ -567,6 +618,7 @@ def default_dependencies() -> WatchdogDependencies:
         token_factory=lambda: secrets.token_hex(3),
         sleep=time.sleep,
         log=lambda message: print(message, file=sys.stderr),
+        onebot_connected=onebot_connected,
     )
 
 

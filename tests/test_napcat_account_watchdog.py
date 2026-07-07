@@ -11,6 +11,7 @@ from scripts.napcat_account_watchdog import (
     find_fresh_qr,
     is_authorized_reply,
     load_config,
+    onebot_connection_from_ss,
     run_watchdog,
 )
 
@@ -34,6 +35,12 @@ def test_load_config_uses_qq_mail_defaults() -> None:
     assert config.alert_email_to == ["admin@example.com"]
 
 
+def test_load_config_can_disable_onebot_connection_requirement() -> None:
+    config = load_config({"WATCHDOG_REQUIRE_ONEBOT_CONNECTION": "false"})
+
+    assert config.watchdog_require_onebot_connection is False
+
+
 def test_evaluate_health_reports_each_failed_signal() -> None:
     config = WatchdogConfig()
     report = evaluate_health(
@@ -48,6 +55,52 @@ def test_evaluate_health_reports_each_failed_signal() -> None:
     assert "qq-rolebot.service is not active" in report.reasons
     assert "127.0.0.1:8080 is not reachable" in report.reasons
     assert "NapCat login requires QR/manual verification" in report.reasons
+
+
+def test_evaluate_health_requires_onebot_connection() -> None:
+    config = WatchdogConfig()
+    report = evaluate_health(
+        config,
+        bot_active=True,
+        napcat_active=True,
+        tcp_ok=True,
+        onebot_connected=False,
+        recent_logs="",
+    )
+
+    assert report.status == "unhealthy"
+    assert "OneBot reverse WebSocket is not connected" in report.reasons
+
+
+def test_evaluate_health_can_ignore_onebot_connection() -> None:
+    config = WatchdogConfig(watchdog_require_onebot_connection=False)
+    report = evaluate_health(
+        config,
+        bot_active=True,
+        napcat_active=True,
+        tcp_ok=True,
+        onebot_connected=False,
+        recent_logs="",
+    )
+
+    assert report.status == "healthy"
+    assert report.reasons == []
+
+
+def test_onebot_connection_from_ss_detects_local_rolebot_connection() -> None:
+    output = (
+        "ESTAB 0 0 127.0.0.1:41980 127.0.0.1:8080 users:((\"qq\",pid=1,fd=1))\n"
+    )
+
+    assert onebot_connection_from_ss(output, "127.0.0.1", 8080) is True
+
+
+def test_onebot_connection_from_ss_ignores_external_remote_port_8080() -> None:
+    output = (
+        "ESTAB 0 0 172.17.150.1:57704 120.241.130.195:8080 users:((\"qq\",pid=1,fd=1))\n"
+    )
+
+    assert onebot_connection_from_ss(output, "127.0.0.1", 8080) is False
 
 
 def test_decide_status_email_sends_offline_only_on_transition() -> None:
@@ -196,6 +249,36 @@ def test_run_watchdog_sends_recovery_email_after_unhealthy(tmp_path: Path) -> No
     assert report.status == "healthy"
     assert len(sent) == 2
     assert sent[1]["Subject"] == "[qq-rolebot] QQ account recovered"
+
+
+def test_run_watchdog_marks_missing_onebot_connection_unhealthy(tmp_path: Path) -> None:
+    sent = []
+    config = WatchdogConfig(
+        watchdog_state_path=str(tmp_path / "state.json"),
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 100.0,
+        token_factory=lambda: "abc123",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+        onebot_connected=lambda cfg: False,
+    )
+
+    report = run_watchdog(config, deps)
+
+    assert report.status == "unhealthy"
+    assert "OneBot reverse WebSocket is not connected" in report.reasons
+    assert len(sent) == 1
 
 
 def test_run_watchdog_reply_sends_fresh_qr_and_marks_uid(tmp_path: Path) -> None:
