@@ -5,9 +5,9 @@ REPO_URL="${1:?repo url is required}"
 BRANCH="${2:?branch is required}"
 TARGET_SHA="${3:?target sha is required}"
 
-APP_DIR="/opt/qq-rolebot"
-PYTHON="/opt/miniconda3/envs/qq-rolebot/bin/python"
-SERVICE="qq-rolebot.service"
+APP_DIR="${APP_DIR:-/opt/qq-rolebot}"
+PYTHON="${PYTHON:-/opt/miniconda3/envs/qq-rolebot/bin/python}"
+SERVICE="${SERVICE:-qq-rolebot.service}"
 
 timestamp() {
   date +%Y%m%d%H%M%S
@@ -40,6 +40,8 @@ checkout_code() {
 
   if [[ -d "$APP_DIR/.git" ]]; then
     cd "$APP_DIR"
+    git reset --hard
+    git clean -fd -e .env -e data/ -e voice_refs/ -e voice_cache/ -e models/
     git remote set-url origin "$REPO_URL"
     git fetch --prune origin "$BRANCH"
     git checkout -B "$BRANCH" "origin/$BRANCH"
