@@ -137,6 +137,39 @@ def test_build_chat_messages_includes_tool_context() -> None:
     assert "Search query: today news" in messages[0]["content"]
 
 
+def test_default_dialect_persona_uses_consistent_wuhan_voice() -> None:
+    persona = load_persona(Path("personas/default_dialect.yaml"))
+    combined = "\n".join(
+        [
+            persona.language,
+            persona.profile,
+            persona.style,
+            persona.rules,
+            "\n".join(persona.examples),
+        ]
+    )
+
+    assert "武汉话教学" not in combined
+    assert "只是他平常讲话的底色" not in combined
+    assert "莫混成四川话" not in combined
+    assert "泛西南腔" not in combined
+    assert "平常就这么讲" in combined
+    assert "群里聊得火热" in combined
+
+
+def test_default_dialect_examples_are_substantial_short_replies() -> None:
+    persona = load_persona(Path("personas/default_dialect.yaml"))
+    replies = [
+        "".join(example.splitlines()[1:]).strip()
+        for example in persona.examples
+        if len(example.splitlines()) >= 2
+    ]
+
+    average_reply_length = sum(len(reply) for reply in replies) / len(replies)
+
+    assert 14 <= average_reply_length <= 20
+
+
 def test_clean_response_trims_and_limits_length() -> None:
     assert clean_response("  hello world  ", max_chars=5, sensitive_words=[]) == "hello"
 
