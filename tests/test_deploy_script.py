@@ -39,6 +39,18 @@ def test_deploy_script_accepts_uploaded_source_archive() -> None:
     assert "for runtime_dir in data voice_refs voice_cache models" in script
 
 
+def test_deploy_script_preserves_watchdog_env() -> None:
+    script = SCRIPT.read_text(encoding="utf-8")
+
+    assert (
+        'if [[ -f "$backup_dir/.watchdog.env" && ! -f "$APP_DIR/.watchdog.env" ]]; then'
+        in script
+    )
+    assert 'cp "$backup_dir/.watchdog.env" "$APP_DIR/.watchdog.env"' in script
+    assert 'chmod 600 "$APP_DIR/.watchdog.env"' in script
+    assert "git clean -fd -e .env -e .watchdog.env -e data/" in script
+
+
 def test_deploy_script_waits_for_bot_port_after_restart() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
 

@@ -11,6 +11,7 @@ Expected paths:
 ```text
 /opt/qq-rolebot                         app code deployed by CI/CD
 /opt/qq-rolebot/.env                    production secrets and runtime config
+/opt/qq-rolebot/.watchdog.env           server-only QQ Mail watchdog config
 /opt/qq-rolebot/data/rolebot.sqlite3    group settings and recent context
 /opt/qq-rolebot/data/voice_cache        generated outgoing voice files
 /opt/qq-rolebot/data/voice_refs         authorized reference audio and transcripts
@@ -20,7 +21,8 @@ Expected paths:
 /opt/models                             optional local model weights
 ```
 
-CI/CD preserves `.env`, `data/`, `voice_refs/`, `voice_cache/`, and `models/` when replacing the app directory.
+CI/CD preserves `.env`, `.watchdog.env`, `data/`, `voice_refs`, `voice_cache`, and `models/` when
+replacing the app directory.
 
 ## 1. Base System Setup
 
@@ -246,7 +248,7 @@ The deploy script:
 - verifies it is operating on `/opt/qq-rolebot`;
 - moves the previous app directory to a timestamped backup;
 - extracts the uploaded source archive into a fresh app directory;
-- restores `.env` and runtime directories;
+- restores `.env`, `.watchdog.env`, and runtime directories;
 - installs the package in the conda environment;
 - runs server-side `ruff` and `pytest`;
 - restarts `qq-rolebot.service`;
@@ -382,7 +384,104 @@ TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
 
 `TTS_SPEAKER` is the Alibaba voice id, not a local path. The client downloads generated audio from the temporary URL returned by DashScope and caches it under `TTS_CACHE_DIR`.
 
-## 10. Troubleshooting
+## 10. NapCat Account Watchdog
+
+The watchdog is a separate one-shot script run by systemd timer. It checks the bot service, NapCat
+service, bot TCP port, and recent NapCat logs. When the account appears offline, it sends a QQ Mail
+alert and attaches the newest fresh QR image when available. If the administrator replies to the
+alert later, the watchdog can refresh NapCat and send a new QR email.
+
+Create `/opt/qq-rolebot/.watchdog.env` on the server. This file is server-only and must be mode
+`600`.
+
+```dotenv
+WATCHDOG_BOT_SERVICE=qq-rolebot.service
+WATCHDOG_NAPCAT_SERVICE=napcat.service
+WATCHDOG_HOST=127.0.0.1
+WATCHDOG_PORT=8080
+WATCHDOG_LOG_WINDOW_MINUTES=10
+WATCHDOG_STATE_PATH=/opt/qq-rolebot/data/account_watchdog_state.json
+WATCHDOG_SEND_RECOVERY=true
+WATCHDOG_QR_PATH=
+WATCHDOG_QR_GLOB=/root/Napcat/**/cache/qrcode.png
+WATCHDOG_QR_MAX_AGE_SECONDS=120
+WATCHDOG_QR_REFRESH_COMMAND="systemctl restart napcat.service"
+WATCHDOG_QR_REFRESH_WAIT_SECONDS=15
+WATCHDOG_REPLY_ENABLED=true
+WATCHDOG_REPLY_ALLOWED_SENDERS=admin@example.com
+WATCHDOG_REPLY_KEYWORDS=qr,qrcode,二维码,扫码,登录
+WATCHDOG_QR_REPLY_COOLDOWN_SECONDS=60
+
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=465
+SMTP_SSL=true
+SMTP_USER=sender@qq.com
+SMTP_PASSWORD=qq-mail-authorization-code
+ALERT_EMAIL_FROM=sender@qq.com
+ALERT_EMAIL_TO=admin@example.com
+
+IMAP_HOST=imap.qq.com
+IMAP_PORT=993
+IMAP_USER=sender@qq.com
+IMAP_PASSWORD=qq-mail-authorization-code
+```
+
+`SMTP_PASSWORD` and `IMAP_PASSWORD` are QQ Mail authorization codes, not the QQ account password.
+Enable SMTP and IMAP in QQ Mail settings before using this file.
+
+Install `/etc/systemd/system/napcat-account-watchdog.service`:
+
+```ini
+[Unit]
+Description=NapCat Account Watchdog
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/qq-rolebot
+EnvironmentFile=/opt/qq-rolebot/.watchdog.env
+ExecStart=/opt/miniconda3/envs/qq-rolebot/bin/python /opt/qq-rolebot/scripts/napcat_account_watchdog.py
+User=root
+```
+
+Install `/etc/systemd/system/napcat-account-watchdog.timer`:
+
+```ini
+[Unit]
+Description=Run NapCat account watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable the timer:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl disable --now napcat-watchdog.timer 2>/dev/null || true
+sudo systemctl enable --now napcat-account-watchdog.timer
+sudo systemctl start napcat-account-watchdog.service
+sudo journalctl -u napcat-account-watchdog -n 80 --no-pager -l
+```
+
+Manual verification:
+
+```bash
+sudo systemctl status napcat-account-watchdog.timer --no-pager -l
+sudo bash -lc 'set -a; . /opt/qq-rolebot/.watchdog.env; set +a; WATCHDOG_PORT=18080 /opt/miniconda3/envs/qq-rolebot/bin/python /opt/qq-rolebot/scripts/napcat_account_watchdog.py'
+sudo journalctl -u napcat-account-watchdog -n 80 --no-pager -l
+```
+
+The QR attachment is sensitive login material. Do not copy it into git, paste it into public logs,
+or forward it outside the administrator mailbox.
+
+## 11. Troubleshooting
 
 ### NapCat reverse WebSocket gets ECONNREFUSED
 
