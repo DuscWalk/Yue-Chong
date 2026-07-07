@@ -204,6 +204,17 @@ mail UID, and marks the message as seen if the IMAP account allows it. This lets
 reply hours later and still receive a current QR code instead of relying on the expired attachment
 from the original alert.
 
+## Mail Reply Button
+
+Offline alert and QR-refresh emails should include both plain text and HTML bodies. The HTML body
+may show a button labeled `获取新二维码`; the button should be a `mailto:` link that opens a reply
+draft to the configured sender address with the active QR token in the subject and `qr` in the body.
+
+This is not a public webhook and does not require exposing a server port. The administrator still
+sends the reply from their mailbox, and the existing IMAP polling flow authorizes the sender and
+token before refreshing the QR code. Plain-text email clients still see the normal instruction to
+reply with `qr`.
+
 ## Configuration
 
 Document these server-only variables:
