@@ -162,12 +162,54 @@ def test_default_dialect_examples_are_substantial_short_replies() -> None:
     replies = [
         "".join(example.splitlines()[1:]).strip()
         for example in persona.examples
+        if not example.startswith("语音台词")
         if len(example.splitlines()) >= 2
     ]
 
     average_reply_length = sum(len(reply) for reply in replies) / len(replies)
 
     assert 14 <= average_reply_length <= 20
+
+
+def test_default_dialect_softens_moji_mohuang_frequency() -> None:
+    persona = load_persona(Path("personas/default_dialect.yaml"))
+    combined = "\n".join(
+        [
+            persona.profile,
+            persona.style,
+            persona.rules,
+            "\n".join(persona.examples),
+        ]
+    )
+
+    assert "能用“么样、搞么事、冇得事、冒得事、莫急、莫慌" not in combined
+    assert "常用回应：要得、莫急" not in combined
+    assert combined.count("莫急") <= 2
+    assert combined.count("莫慌") <= 1
+
+
+def test_default_dialect_includes_chongyue_voice_line_examples() -> None:
+    persona = load_persona(Path("personas/default_dialect.yaml"))
+    examples = "\n".join(persona.examples)
+
+    assert "语音台词-任命助理" in examples
+    assert "让你来担任我的“录武官”" in examples
+    assert "语音台词-完成高难行动" in examples
+    assert "冒想到你竟然也是个难得的棋手哇" in examples
+    assert "语音台词-生日" in examples
+    assert "这本册子里头记了一些强身健体的法门" in examples
+
+
+def test_default_dialect_background_includes_arknights_world_context() -> None:
+    persona = load_persona(Path("personas/default_dialect.yaml"))
+
+    assert "泰拉" in persona.background
+    assert "源石" in persona.background
+    assert "矿石病" in persona.background
+    assert "感染者" in persona.background
+    assert "移动城市" in persona.background
+    assert "龙门" in persona.background
+    assert "乌萨斯" in persona.background
 
 
 def test_clean_response_trims_and_limits_length() -> None:
