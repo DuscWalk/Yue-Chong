@@ -8,6 +8,9 @@ TARGET_SHA="${3:?target sha is required}"
 APP_DIR="${APP_DIR:-/opt/qq-rolebot}"
 PYTHON="${PYTHON:-/opt/miniconda3/envs/qq-rolebot/bin/python}"
 SERVICE="${SERVICE:-qq-rolebot.service}"
+BOT_HOST="${BOT_HOST:-127.0.0.1}"
+BOT_PORT="${BOT_PORT:-8080}"
+BOT_READY_TIMEOUT_SECONDS="${BOT_READY_TIMEOUT_SECONDS:-30}"
 
 timestamp() {
   date +%Y%m%d%H%M%S
@@ -118,9 +121,28 @@ install_and_test() {
   "$PYTHON" -m pytest -q
 }
 
+wait_for_bot_port() {
+  echo "Waiting for $SERVICE to listen on $BOT_HOST:$BOT_PORT"
+
+  local elapsed=0
+  while (( elapsed < BOT_READY_TIMEOUT_SECONDS )); do
+    if (echo > "/dev/tcp/$BOT_HOST/$BOT_PORT") >/dev/null 2>&1; then
+      echo "$SERVICE is listening on $BOT_HOST:$BOT_PORT"
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  echo "$SERVICE did not listen on $BOT_HOST:$BOT_PORT within ${BOT_READY_TIMEOUT_SECONDS}s" >&2
+  journalctl -u "$SERVICE" -n 80 --no-pager || true
+  return 1
+}
+
 restart_service() {
   systemctl restart "$SERVICE"
   systemctl is-active "$SERVICE"
+  wait_for_bot_port
   journalctl -u "$SERVICE" -n 40 --no-pager
 }
 

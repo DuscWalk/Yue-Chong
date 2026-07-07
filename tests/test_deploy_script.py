@@ -39,6 +39,21 @@ def test_deploy_script_accepts_uploaded_source_archive() -> None:
     assert "for runtime_dir in data voice_refs voice_cache models" in script
 
 
+def test_deploy_script_waits_for_bot_port_after_restart() -> None:
+    script = SCRIPT.read_text(encoding="utf-8")
+
+    assert 'BOT_HOST="${BOT_HOST:-127.0.0.1}"' in script
+    assert 'BOT_PORT="${BOT_PORT:-8080}"' in script
+    assert "wait_for_bot_port() {" in script
+    assert 'echo "Waiting for $SERVICE to listen on $BOT_HOST:$BOT_PORT"' in script
+
+    restart_service = script.split("restart_service() {", 1)[1].split("}", 1)[0]
+    active_index = restart_service.index('systemctl is-active "$SERVICE"')
+    wait_index = restart_service.index("wait_for_bot_port")
+
+    assert active_index < wait_index
+
+
 def test_github_actions_uploads_archive_instead_of_server_fetching_github() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 

@@ -228,3 +228,45 @@ In the whitelisted QQ group:
 ```
 
 Then mention the QQ alternate account. The bot should reply once, stay within rate limits, and ignore non-whitelisted groups.
+
+## Troubleshooting
+
+### NapCat reverse WebSocket gets ECONNREFUSED
+
+If NapCat repeatedly logs that `ws://127.0.0.1:8080/onebot/v11/ws` is refused, the Python bot is
+not listening on the configured host and port yet. Check the bot first:
+
+```bash
+systemctl status qq-rolebot --no-pager
+journalctl -u qq-rolebot -n 120 --no-pager
+ss -ltnp | grep ':8080'
+grep -E '^(BOT_HOST|BOT_PORT)=' /opt/qq-rolebot/.env
+```
+
+`BOT_PORT` must match the port in NapCat's reverse WebSocket URL. After CI/CD deployment, the
+deploy script now waits for `127.0.0.1:8080` to accept TCP connections before reporting success,
+so a persistent refused connection should fail the deployment instead of silently passing.
+
+### Linux QQ or NapCat crashes with GPU process errors
+
+If the log contains `GPU process launch failed` followed by `GPU process isn't usable. Goodbye.`,
+the QQ/Electron process crashed before NapCat could keep the gateway alive. On headless Linux,
+start QQ/NapCat under Xvfb and pass Chromium/Electron flags that disable GPU usage.
+
+Depending on the service or launcher installed by NapCat, the effective command should include
+the same idea as:
+
+```bash
+xvfb-run -a qq --no-sandbox --disable-gpu --disable-dev-shm-usage
+```
+
+After changing the NapCat launcher or service, reload systemd and restart the gateway:
+
+```bash
+systemctl daemon-reload
+systemctl restart napcat
+journalctl -u napcat -n 120 --no-pager
+```
+
+If the service name is different, replace `napcat` with the actual unit name from
+`systemctl list-units '*nap*'`.
