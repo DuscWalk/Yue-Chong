@@ -43,6 +43,8 @@ def test_load_settings_from_mapping() -> None:
     assert settings.keywords == ["mika", "bot"]
     assert settings.sensitive_words == ["blocked"]
     assert settings.default_random_reply_probability == 8
+    assert settings.repeat_reply_enabled is True
+    assert settings.repeat_reply_threshold == 2
     assert settings.persona_variant == "dialect"
     assert settings.persona_path.as_posix() == "personas/default_dialect.yaml"
 
@@ -106,6 +108,21 @@ def test_load_settings_reads_tool_overrides() -> None:
     assert settings.tools_enable_search is False
     assert settings.tools_enable_persona_sources is False
     assert settings.tools_enable_time is False
+
+
+def test_load_settings_reads_repeat_reply_overrides() -> None:
+    env = complete_env()
+    env.update(
+        {
+            "REPEAT_REPLY_ENABLED": "false",
+            "REPEAT_REPLY_THRESHOLD": "3",
+        }
+    )
+
+    settings = load_settings(env)
+
+    assert settings.repeat_reply_enabled is False
+    assert settings.repeat_reply_threshold == 3
 
 
 def test_load_settings_reads_tts_defaults() -> None:
@@ -222,4 +239,12 @@ def test_load_settings_rejects_invalid_probability() -> None:
     env["DEFAULT_RANDOM_REPLY_PROBABILITY"] = "101"
 
     with pytest.raises(ConfigError, match="DEFAULT_RANDOM_REPLY_PROBABILITY"):
+        load_settings(env)
+
+
+def test_load_settings_rejects_invalid_repeat_reply_threshold() -> None:
+    env = complete_env()
+    env["REPEAT_REPLY_THRESHOLD"] = "1"
+
+    with pytest.raises(ConfigError, match="REPEAT_REPLY_THRESHOLD"):
         load_settings(env)

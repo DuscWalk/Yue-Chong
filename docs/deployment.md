@@ -92,12 +92,15 @@ Group behavior:
 
 ```dotenv
 DEFAULT_RANDOM_REPLY_PROBABILITY=3
+REPEAT_REPLY_ENABLED=true
+REPEAT_REPLY_THRESHOLD=2
 KEYWORDS=
 FOLLOWUP_WINDOW_SECONDS=90
 FOLLOWUP_TRIGGER_KEYWORDS=你,你觉得,你看,怎么看,咋看,怎么样,如何,说话,回话,大哥,重岳,岳饼
 ```
 
 Existing groups keep their stored probability in SQLite. Use `/bot prob N` in a group to change that group without editing `.env`.
+When `REPEAT_REPLY_ENABLED=true`, the bot can join a repeated-message chain after `REPEAT_REPLY_THRESHOLD` consecutive identical unaddressed group messages from at least two users.
 
 Tools:
 
@@ -392,9 +395,11 @@ appears offline, it sends a QQ Mail alert and attaches the newest fresh QR image
 the administrator replies to the alert later, the watchdog can refresh NapCat and send a new QR
 email.
 
-HTML-capable mail clients also show a `获取新二维码` button. The button opens a prefilled reply
-draft through `mailto:`; the administrator still sends the email, and the watchdog authorizes that
-reply through the same IMAP sender and token checks.
+HTML-capable mail clients also show a `获取新二维码` button. When
+`WATCHDOG_CLICK_PUBLIC_BASE_URL` is configured, the button opens a server endpoint that refreshes
+NapCat and sends a fresh QR email to the administrator mailbox. The web page does not display the
+QR image. If no public click URL is configured, the button falls back to the older `mailto:` reply
+draft flow.
 
 Create `/opt/qq-rolebot/.watchdog.env` on the server. This file is server-only and must be mode
 `600`.

@@ -66,6 +66,8 @@ class Settings:
     model_timeout_seconds: int
     max_output_chars: int
     default_random_reply_probability: int
+    repeat_reply_enabled: bool
+    repeat_reply_threshold: int
     keywords: list[str]
     sensitive_words: list[str]
     tavily_api_key: str
@@ -106,6 +108,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     probability = _int(env, "DEFAULT_RANDOM_REPLY_PROBABILITY", 8)
     if probability < 0 or probability > 100:
         raise ConfigError("DEFAULT_RANDOM_REPLY_PROBABILITY must be between 0 and 100")
+
+    repeat_reply_threshold = _int(env, "REPEAT_REPLY_THRESHOLD", 2)
+    if repeat_reply_threshold < 2:
+        raise ConfigError("REPEAT_REPLY_THRESHOLD must be greater than or equal to 2")
 
     max_output_chars = _int(env, "MAX_OUTPUT_CHARS", 280)
     if max_output_chars < 1:
@@ -181,6 +187,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         model_timeout_seconds=timeout,
         max_output_chars=max_output_chars,
         default_random_reply_probability=probability,
+        repeat_reply_enabled=_bool(env, "REPEAT_REPLY_ENABLED", True),
+        repeat_reply_threshold=repeat_reply_threshold,
         keywords=parse_str_list(env.get("KEYWORDS", "")),
         sensitive_words=parse_str_list(env.get("SENSITIVE_WORDS", "")),
         tavily_api_key=env.get("TAVILY_API_KEY", "").strip(),

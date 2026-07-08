@@ -86,6 +86,10 @@ class ChatService:
             )
 
         group = await self.storage.get_group_settings(message.group_id)
+        repeat_reply = await self._repeat_reply(message, muted_until=group.muted_until)
+        if repeat_reply is not None and group.enabled:
+            return repeat_reply
+
         followup_matched = False
         if self.followup_tracker is not None:
             if message.is_at_bot or message.is_reply_to_bot:
@@ -137,6 +141,34 @@ class ChatService:
             return None
 
         return reply
+
+    async def _repeat_reply(self, message: IncomingMessage, *, muted_until: int) -> str | None:
+        if not self.settings.repeat_reply_enabled:
+            return None
+        if muted_until > message.created_at:
+            return None
+        if message.is_at_bot or message.is_reply_to_bot:
+            return None
+
+        context = await self.storage.recent_messages(message.group_id)
+        threshold = self.settings.repeat_reply_threshold
+        if len(context) < threshold:
+            return None
+
+        tail = context[-threshold:]
+        text = message.text.strip()
+        if not text:
+            return None
+        if any(item.text.strip() != text for item in tail):
+            return None
+        if len({item.user_id for item in tail}) < 2:
+            return None
+
+        return clean_response(
+            text,
+            max_chars=self.settings.max_output_chars,
+            sensitive_words=self.settings.sensitive_words,
+        )
 
     async def _handle_private(self, message: IncomingMessage) -> str | None:
         context_id = -abs(message.user_id)

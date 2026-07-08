@@ -24,6 +24,15 @@ class CapturingModel:
         return ModelResult(ok=True, text="model reply")
 
 
+class CountingModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, messages: list[dict[str, str]]) -> ModelResult:
+        self.calls += 1
+        return ModelResult(ok=True, text="model reply")
+
+
 class FakeToolRunner:
     def __init__(self, *, direct_reply: str | None = None, context: str = "") -> None:
         self.direct_reply = direct_reply
@@ -197,6 +206,124 @@ async def test_service_does_not_rate_limit_random_group_replies(tmp_path: Path) 
 
     assert first == "model reply"
     assert second == "model reply"
+
+
+@pytest.mark.asyncio
+async def test_service_follows_repeated_group_message_without_model(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    model = CountingModel()
+    tools = FakeToolRunner(context="Search query: repeated")
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+        tool_runner=tools,
+    )
+
+    first = await service.handle(
+        msg("好耶", at_bot=False, sender=11, created_at=100),
+        random_value=99,
+    )
+    second = await service.handle(
+        msg("好耶", at_bot=False, sender=12, created_at=101),
+        random_value=99,
+    )
+
+    assert first is None
+    assert second == "好耶"
+    assert model.calls == 0
+    assert tools.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_service_repeat_reply_can_be_disabled(tmp_path: Path) -> None:
+    raw_env = env(tmp_path)
+    raw_env["REPEAT_REPLY_ENABLED"] = "false"
+    settings = load_settings(raw_env)
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=CountingModel(),
+        rate_limiter=RateLimiter(),
+    )
+
+    first = await service.handle(
+        msg("好耶", at_bot=False, sender=11, created_at=100),
+        random_value=99,
+    )
+    second = await service.handle(
+        msg("好耶", at_bot=False, sender=12, created_at=101),
+        random_value=99,
+    )
+
+    assert first is None
+    assert second is None
+
+
+@pytest.mark.asyncio
+async def test_service_repeat_reply_respects_threshold(tmp_path: Path) -> None:
+    raw_env = env(tmp_path)
+    raw_env["REPEAT_REPLY_THRESHOLD"] = "3"
+    settings = load_settings(raw_env)
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=CountingModel(),
+        rate_limiter=RateLimiter(),
+    )
+
+    first = await service.handle(
+        msg("懂了", at_bot=False, sender=11, created_at=100),
+        random_value=99,
+    )
+    second = await service.handle(
+        msg("懂了", at_bot=False, sender=12, created_at=101),
+        random_value=99,
+    )
+    third = await service.handle(
+        msg("懂了", at_bot=False, sender=13, created_at=102),
+        random_value=99,
+    )
+
+    assert first is None
+    assert second is None
+    assert third == "懂了"
+
+
+@pytest.mark.asyncio
+async def test_service_repeat_reply_requires_multiple_users(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=CountingModel(),
+        rate_limiter=RateLimiter(),
+    )
+
+    first = await service.handle(
+        msg("好耶", at_bot=False, sender=11, created_at=100),
+        random_value=99,
+    )
+    second = await service.handle(
+        msg("好耶", at_bot=False, sender=11, created_at=101),
+        random_value=99,
+    )
+
+    assert first is None
+    assert second is None
 
 
 @pytest.mark.asyncio
