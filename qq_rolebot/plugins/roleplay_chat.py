@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import random
 import time
+from collections import defaultdict
 
 from nonebot import get_driver, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
@@ -131,6 +133,7 @@ if settings.tts_enabled and settings.tts_api_url:
     )
 
 matcher = on_message(priority=50, block=False)
+_conversation_locks: defaultdict[tuple[str, int], asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 async def init_storage() -> None:
@@ -253,6 +256,7 @@ def build_incoming_message(
             created_at=int(getattr(event, "time", int(time.time()))),
             image_urls=media_urls.image_urls,
             video_urls=media_urls.video_urls,
+            media_markers=media_urls.markers,
             media_source=media_source,
             reply_message_id=reply_message_id,
         )
@@ -268,6 +272,7 @@ def build_incoming_message(
             created_at=int(getattr(event, "time", int(time.time()))),
             image_urls=media_urls.image_urls,
             video_urls=media_urls.video_urls,
+            media_markers=media_urls.markers,
             media_source=media_source,
             reply_message_id=reply_message_id,
         )
@@ -275,8 +280,22 @@ def build_incoming_message(
     return None
 
 
+def conversation_scope(event: MessageEvent) -> tuple[str, int]:
+    message_type = str(getattr(event, "message_type", ""))
+    if message_type == "group":
+        return ("group", int(getattr(event, "group_id", 0)))
+    if message_type == "private":
+        return ("private", int(getattr(event, "user_id", 0)))
+    return (message_type or "unknown", int(getattr(event, "user_id", 0)))
+
+
 @matcher.handle()
 async def handle_message(bot: Bot, event: MessageEvent) -> None:
+    async with _conversation_locks[conversation_scope(event)]:
+        await _handle_message_locked(bot, event)
+
+
+async def _handle_message_locked(bot: Bot, event: MessageEvent) -> None:
     incoming = build_incoming_message(event, settings.bot_qq)
     if incoming is not None and not (incoming.image_urls or incoming.video_urls):
         fetched_media_urls = await fetch_replied_media_urls(bot, incoming.reply_message_id)

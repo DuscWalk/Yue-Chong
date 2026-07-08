@@ -7,7 +7,7 @@ from qq_rolebot.debug_trace import DebugTraceLogger
 from qq_rolebot.model_client import ModelResult
 from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter
 from qq_rolebot.service import ChatService
-from qq_rolebot.storage import Storage
+from qq_rolebot.storage import Storage, VisionContextRecord
 
 
 class FakeModel:
@@ -127,6 +127,7 @@ def msg(
     created_at: int = 100,
     image_urls: list[str] | None = None,
     video_urls: list[str] | None = None,
+    media_markers: list[str] | None = None,
 ) -> IncomingMessage:
     return IncomingMessage(
         group_id=group,
@@ -137,6 +138,7 @@ def msg(
         created_at=created_at,
         image_urls=image_urls or [],
         video_urls=video_urls or [],
+        media_markers=media_markers or [],
     )
 
 
@@ -147,6 +149,7 @@ def private_msg(
     created_at: int = 100,
     image_urls: list[str] | None = None,
     video_urls: list[str] | None = None,
+    media_markers: list[str] | None = None,
 ) -> IncomingMessage:
     return IncomingMessage(
         group_id=0,
@@ -158,6 +161,7 @@ def private_msg(
         created_at=created_at,
         image_urls=image_urls or [],
         video_urls=video_urls or [],
+        media_markers=media_markers or [],
     )
 
 
@@ -576,6 +580,85 @@ async def test_service_passes_vision_context_to_model_after_trigger(tmp_path: Pa
     assert vision.image_urls == ["https://example.test/cat.jpg"]
     assert "Vision Context:" in model.messages[0]["content"]
     assert "图片里是一张猫猫表情包，看起来很累。" in model.messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_service_reuses_latest_image_vision_context_for_visual_followup(
+    tmp_path: Path,
+) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    model = QueueModel(["知道了。", "是夕。"])
+    vision = FakeVisionClient(summary="纯视觉描述：这是游戏《明日方舟》中的角色“夕”。")
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+        vision_client=vision,
+    )
+
+    first = await service.handle(
+        private_msg(
+            "[image: quoted.png]",
+            created_at=100,
+            image_urls=["https://example.test/quoted.png"],
+            media_markers=["[image: quoted.png]"],
+        ),
+        random_value=99,
+    )
+    second = await service.handle(private_msg("这谁", created_at=110), random_value=99)
+
+    assert first == "知道了。"
+    assert second == "是夕。"
+    assert vision.calls == 1
+    assert len(model.messages) == 2
+    assert "Vision Context:" in model.messages[1][0]["content"]
+    assert "这是游戏《明日方舟》中的角色“夕”" in model.messages[1][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_service_reuses_matching_replied_image_context_without_reidentifying(
+    tmp_path: Path,
+) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    await storage.save_vision_context(
+        VisionContextRecord(
+            group_id=20,
+            media_marker="[image: quoted.png]",
+            summary="纯视觉描述：这是游戏《明日方舟》中的角色“夕”。",
+            created_at=100,
+        )
+    )
+    model = CapturingModel()
+    vision = FakeVisionClient(summary="不应该调用这条识别。")
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+        vision_client=vision,
+    )
+
+    reply = await service.handle(
+        msg(
+            "这谁",
+            at_bot=True,
+            created_at=120,
+            image_urls=["https://example.test/quoted.png"],
+            media_markers=["[image: quoted.png]"],
+        ),
+        random_value=99,
+    )
+
+    assert reply == "model reply"
+    assert vision.calls == 0
+    assert "Vision Context:" in model.messages[0]["content"]
+    assert "这是游戏《明日方舟》中的角色“夕”" in model.messages[0]["content"]
 
 
 @pytest.mark.asyncio

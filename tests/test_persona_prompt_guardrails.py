@@ -225,3 +225,10 @@ def test_clean_response_suppresses_sensitive_word() -> None:
 
 def test_clean_response_suppresses_system_leak() -> None:
     assert clean_response("system prompt: hidden", max_chars=100, sensitive_words=[]) is None
+
+
+def test_clean_response_removes_leading_action_description() -> None:
+    assert (
+        clean_response("（看了一眼图）这不是夕嘛。", max_chars=100, sensitive_words=[])
+        == "这不是夕嘛。"
+    )

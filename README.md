@@ -161,7 +161,9 @@ Vision summary:
 
 - Enabled by `VISION_MODEL_ENABLED=true`.
 - Runs only after reply triggering and only for current messages with HTTP media URLs.
+- Messages in the same private chat or same group are handled sequentially, so a text follow-up waits for an earlier image recognition request in that chat to finish.
 - If a user replies to an image and asks the bot about it, the bot uses the replied message's media before falling back to recent text context.
+- Successful image summaries are saved as short-lived text context keyed by their `[image: ...]` or `[video: ...]` marker. Follow-up questions like `这谁` can reuse the latest summary, and replies to a previously summarized image reuse the matching summary without re-identifying it.
 - Downloads static images in memory, sends the same `data:` inputs to both visual summary and image/web search, and does not persist the downloaded image bytes.
 - Sends OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` as `video_url`.
 - When `VISION_MODEL_ENABLE_SEARCH=true`, adds a short image/web search summary before the pure visual description; if they conflict, the main model is told to prefer the search result.
@@ -171,7 +173,7 @@ Debug traces:
 
 - Always enabled.
 - Written as per-message JSONL files under `DEBUG_TRACE_DIR`.
-- Include incoming message text/media URLs, media source, replied message id, vision recognition result, image/web search result, final model prompt, model response, and final cleaned reply.
+- Include incoming message text/media URLs, media marker/source, replied message id, vision recognition result, image/web search result, saved/reused vision context, final model prompt, model response, and final cleaned reply.
 - Downloaded image `data:` payloads are redacted in traces; fetch events keep only source URL, media type, byte count, and timing.
 - Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned whenever a new trace event is written.
 - API keys and Authorization headers are not written.

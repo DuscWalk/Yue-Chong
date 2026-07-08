@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from qq_rolebot.storage import GroupSettings, MessageRecord, Storage
+from qq_rolebot.storage import GroupSettings, MessageRecord, Storage, VisionContextRecord
 
 
 @pytest.mark.asyncio
@@ -102,3 +102,79 @@ async def test_clear_group_context(tmp_path: Path) -> None:
     await storage.clear_context(123)
 
     assert await storage.recent_messages(123) == []
+
+
+@pytest.mark.asyncio
+async def test_vision_context_can_be_found_by_media_marker(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "bot.sqlite3", context_window_seconds=600)
+    await storage.init()
+
+    await storage.save_vision_context(
+        VisionContextRecord(
+            group_id=123,
+            media_marker="[image: quoted.png]",
+            summary="纯视觉描述：这是夕。",
+            created_at=100,
+        )
+    )
+
+    record = await storage.find_vision_context(
+        123,
+        media_markers=["[image: quoted.png]"],
+        now=120,
+    )
+
+    assert record is not None
+    assert record.summary == "纯视觉描述：这是夕。"
+
+
+@pytest.mark.asyncio
+async def test_vision_context_falls_back_to_latest_recent_image(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "bot.sqlite3", context_window_seconds=600)
+    await storage.init()
+
+    await storage.save_vision_context(
+        VisionContextRecord(
+            group_id=123,
+            media_marker="[image: old.png]",
+            summary="纯视觉描述：旧图。",
+            created_at=100,
+        )
+    )
+    await storage.save_vision_context(
+        VisionContextRecord(
+            group_id=123,
+            media_marker="[image: latest.png]",
+            summary="纯视觉描述：这是夕。",
+            created_at=110,
+        )
+    )
+
+    record = await storage.find_vision_context(123, media_markers=[], now=120)
+
+    assert record is not None
+    assert record.media_marker == "[image: latest.png]"
+    assert record.summary == "纯视觉描述：这是夕。"
+
+
+@pytest.mark.asyncio
+async def test_vision_context_respects_context_window(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "bot.sqlite3", context_window_seconds=10)
+    await storage.init()
+
+    await storage.save_vision_context(
+        VisionContextRecord(
+            group_id=123,
+            media_marker="[image: old.png]",
+            summary="纯视觉描述：旧图。",
+            created_at=100,
+        )
+    )
+
+    record = await storage.find_vision_context(
+        123,
+        media_markers=["[image: old.png]"],
+        now=111,
+    )
+
+    assert record is None

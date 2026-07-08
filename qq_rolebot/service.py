@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Protocol
 
@@ -11,9 +12,24 @@ from qq_rolebot.model_client import ModelResult
 from qq_rolebot.persona import load_persona
 from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter, decide_trigger
 from qq_rolebot.prompting import build_chat_messages
-from qq_rolebot.storage import MessageRecord, Storage
+from qq_rolebot.storage import MessageRecord, Storage, VisionContextRecord
 
 REPEAT_REPLY_COOLDOWN_SECONDS = 600
+MEDIA_MARKER_PATTERN = re.compile(r"\[(?:image|video): [^\]]+\]")
+VISUAL_FOLLOWUP_HINTS = (
+    "这",
+    "这个",
+    "那",
+    "图",
+    "图片",
+    "表情",
+    "谁",
+    "啥",
+    "什么",
+    "什么意思",
+    "哪",
+    "画",
+)
 VISION_FAILURE_CONTEXT = (
     "Vision Context:\n"
     "视觉识别失败：{error}。这条消息包含图片、表情包、动图或视频，"
@@ -211,7 +227,7 @@ class ChatService:
 
         tool_context = self._join_context(
             tool_context,
-            await self._vision_context(message, trace=trace),
+            await self._vision_context(message, context_id=message.group_id, trace=trace),
         )
         context = await self.storage.recent_messages(message.group_id, now=message.created_at)
         messages = build_chat_messages(self.persona, context, message, tool_context=tool_context)
@@ -249,7 +265,29 @@ class ChatService:
         self._trace(trace, "reply.final", {"reply": reply, "source": "model"})
         return reply
 
-    async def _vision_context(self, message: IncomingMessage, *, trace: DebugTrace | None) -> str:
+    async def _vision_context(
+        self,
+        message: IncomingMessage,
+        *,
+        context_id: int,
+        trace: DebugTrace | None,
+    ) -> str:
+        reusable = await self._stored_vision_context(message, context_id=context_id)
+        if reusable is not None:
+            context = self._format_vision_context(
+                reusable.summary,
+                media_marker=reusable.media_marker,
+            )
+            self._trace(
+                trace,
+                "vision.context",
+                {
+                    "context": context,
+                    "source": "stored",
+                    "media_marker": reusable.media_marker,
+                },
+            )
+            return context
         if self.vision_client is None or not (message.image_urls or message.video_urls):
             self._trace(
                 trace,
@@ -275,13 +313,95 @@ class ChatService:
         if not summary:
             self._trace(trace, "vision.context", {"context": "", "reason": "empty summary"})
             return ""
-        context = f"Vision Context:\n{summary}"
+        await self._save_vision_context(
+            context_id=context_id,
+            message=message,
+            summary=summary,
+            trace=trace,
+        )
+        media_marker = self._media_markers(message)[0] if self._media_markers(message) else ""
+        context = self._format_vision_context(summary, media_marker=media_marker)
         self._trace(trace, "vision.context", {"context": context})
         return context
 
     @staticmethod
     def _join_context(*items: str) -> str:
         return "\n\n".join(item for item in items if item)
+
+    async def _stored_vision_context(
+        self,
+        message: IncomingMessage,
+        *,
+        context_id: int,
+    ) -> VisionContextRecord | None:
+        media_markers = self._media_markers(message)
+        if media_markers:
+            return await self.storage.find_vision_context(
+                context_id,
+                media_markers=media_markers,
+                now=message.created_at,
+            )
+        if message.image_urls or message.video_urls:
+            return None
+        if not self._looks_like_visual_followup(message.text):
+            return None
+        return await self.storage.find_vision_context(
+            context_id,
+            media_markers=[],
+            now=message.created_at,
+        )
+
+    async def _save_vision_context(
+        self,
+        *,
+        context_id: int,
+        message: IncomingMessage,
+        summary: str,
+        trace: DebugTrace | None,
+    ) -> None:
+        media_markers = self._media_markers(message)
+        for media_marker in media_markers:
+            await self.storage.save_vision_context(
+                VisionContextRecord(
+                    group_id=context_id,
+                    media_marker=media_marker,
+                    summary=summary,
+                    created_at=message.created_at,
+                )
+            )
+        if media_markers:
+            self._trace(
+                trace,
+                "vision.context.saved",
+                {"media_markers": media_markers, "count": len(media_markers)},
+            )
+
+    @staticmethod
+    def _media_markers(message: IncomingMessage) -> list[str]:
+        markers = [marker.strip() for marker in message.media_markers if marker.strip()]
+        markers.extend(MEDIA_MARKER_PATTERN.findall(message.text))
+        return list(dict.fromkeys(markers))
+
+    @staticmethod
+    def _looks_like_visual_followup(text: str) -> bool:
+        compact = "".join(text.split())
+        if not compact or len(compact) > 30:
+            return False
+        return any(hint in compact for hint in VISUAL_FOLLOWUP_HINTS)
+
+    @staticmethod
+    def _format_vision_context(summary: str, *, media_marker: str = "") -> str:
+        lines = [
+            "Vision Context:",
+            (
+                "这是当前图片或追问所对应的视觉摘要；"
+                "若它与 Recent chat context 里的旧回复冲突，优先参考这里。"
+            ),
+        ]
+        if media_marker:
+            lines.append(f"关联图片：{media_marker}")
+        lines.append(summary)
+        return "\n".join(lines)
 
     async def _repeat_reply(self, message: IncomingMessage, *, muted_until: int) -> str | None:
         if not self.settings.repeat_reply_enabled:
@@ -372,7 +492,7 @@ class ChatService:
 
         tool_context = self._join_context(
             tool_context,
-            await self._vision_context(message, trace=trace),
+            await self._vision_context(message, context_id=context_id, trace=trace),
         )
         context = await self.storage.recent_messages(context_id, now=message.created_at)
         messages = build_chat_messages(self.persona, context, message, tool_context=tool_context)
@@ -421,6 +541,7 @@ class ChatService:
                 "created_at": message.created_at,
                 "image_urls": message.image_urls,
                 "video_urls": message.video_urls,
+                "media_markers": message.media_markers,
                 "media_source": message.media_source,
                 "reply_message_id": message.reply_message_id,
             }

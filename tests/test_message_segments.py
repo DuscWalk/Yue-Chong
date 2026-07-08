@@ -62,3 +62,14 @@ def test_extract_media_urls_splits_static_images_and_dynamic_media() -> None:
         "https://example.test/clip.mp4",
         "https://example.test/clip.mov",
     ]
+
+
+def test_extract_media_urls_keeps_media_markers() -> None:
+    message = [
+        segment("image", file="quoted.png", url="https://example.test/quoted.png"),
+        segment("video", file="clip.mp4", url="https://example.test/clip.mp4"),
+    ]
+
+    media = message_segments.extract_media_urls(message)
+
+    assert media.markers == ["[image: quoted.png]", "[video: clip.mp4]"]

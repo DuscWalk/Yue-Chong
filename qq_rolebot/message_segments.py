@@ -24,6 +24,7 @@ _DYNAMIC_MEDIA_EXTENSIONS = {
 class MediaUrls:
     image_urls: list[str] = field(default_factory=list)
     video_urls: list[str] = field(default_factory=list)
+    markers: list[str] = field(default_factory=list)
 
 
 def _data(segment: Any) -> dict[str, Any]:
@@ -96,19 +97,26 @@ def extract_image_urls(message: Iterable[Any]) -> list[str]:
 def extract_media_urls(message: Iterable[Any]) -> MediaUrls:
     image_urls: list[str] = []
     video_urls: list[str] = []
+    markers: list[str] = []
     for segment in message:
         segment_type = _segment_type(segment)
+        if segment_type not in {"image", "video"}:
+            continue
         data = _data(segment)
         label = _first_value(data, ("url", "file"))
         if not _is_http_url(label):
             continue
+        marker_label = _first_value(data, ("file", "url", "summary"))
+        if marker_label:
+            marker_type = "image" if segment_type == "image" else "video"
+            markers.append(f"[{marker_type}: {marker_label}]")
         if segment_type == "video" or (
             segment_type == "image" and _is_dynamic_media_url(label)
         ):
             video_urls.append(label)
         elif segment_type == "image":
             image_urls.append(label)
-    return MediaUrls(image_urls=image_urls, video_urls=video_urls)
+    return MediaUrls(image_urls=image_urls, video_urls=video_urls, markers=markers)
 
 
 def is_reply_to(message: Iterable[Any]) -> bool:

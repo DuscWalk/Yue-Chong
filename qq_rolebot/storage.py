@@ -23,6 +23,14 @@ class MessageRecord:
     created_at: int
 
 
+@dataclass(frozen=True)
+class VisionContextRecord:
+    group_id: int
+    media_marker: str
+    summary: str
+    created_at: int
+
+
 class Storage:
     def __init__(
         self,
@@ -66,6 +74,17 @@ class Storage:
                     note TEXT NOT NULL,
                     PRIMARY KEY (group_id, user_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS vision_context (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id INTEGER NOT NULL,
+                    media_marker TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_vision_context_group_marker_time
+                ON vision_context(group_id, media_marker, created_at);
                 """
             )
             await db.commit()
@@ -200,4 +219,77 @@ class Storage:
     async def clear_context(self, group_id: int) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.execute("DELETE FROM message_context WHERE group_id = ?", (group_id,))
+            await db.execute("DELETE FROM vision_context WHERE group_id = ?", (group_id,))
             await db.commit()
+
+    async def save_vision_context(self, record: VisionContextRecord) -> None:
+        media_marker = record.media_marker.strip()
+        summary = record.summary.strip()
+        if not media_marker or not summary:
+            return
+        cutoff = record.created_at - self.context_window_seconds
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO vision_context (group_id, media_marker, summary, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (record.group_id, media_marker, summary, record.created_at),
+            )
+            await db.execute(
+                """
+                DELETE FROM vision_context
+                WHERE group_id = ?
+                  AND created_at < ?
+                """,
+                (record.group_id, cutoff),
+            )
+            await db.commit()
+
+    async def find_vision_context(
+        self,
+        group_id: int,
+        *,
+        media_markers: list[str],
+        now: int,
+    ) -> VisionContextRecord | None:
+        cutoff = now - self.context_window_seconds
+        markers = [marker.strip() for marker in media_markers if marker.strip()]
+        async with aiosqlite.connect(self.path) as db:
+            if markers:
+                placeholders = ", ".join("?" for _ in markers)
+                rows = await db.execute_fetchall(
+                    f"""
+                    SELECT group_id, media_marker, summary, created_at
+                    FROM vision_context
+                    WHERE group_id = ?
+                      AND media_marker IN ({placeholders})
+                      AND created_at >= ?
+                      AND created_at <= ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (group_id, *markers, cutoff, now),
+                )
+            else:
+                rows = await db.execute_fetchall(
+                    """
+                    SELECT group_id, media_marker, summary, created_at
+                    FROM vision_context
+                    WHERE group_id = ?
+                      AND created_at >= ?
+                      AND created_at <= ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (group_id, cutoff, now),
+                )
+        if not rows:
+            return None
+        row = rows[0]
+        return VisionContextRecord(
+            group_id=int(row[0]),
+            media_marker=str(row[1]),
+            summary=str(row[2]),
+            created_at=int(row[3]),
+        )

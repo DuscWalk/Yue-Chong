@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 from types import SimpleNamespace
 
@@ -275,6 +276,156 @@ async def test_handle_message_continues_when_replied_message_fetch_fails(monkeyp
 
     assert seen["incoming"].image_urls == []
     assert seen["incoming"].reply_message_id == "12345"
+
+
+async def test_handle_message_serializes_same_private_chat(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+    calls = []
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    class FakeService:
+        async def handle(self, incoming, *, random_value: int):
+            calls.append(f"start:{incoming.text}")
+            if incoming.text == "first":
+                first_started.set()
+                await release_first.wait()
+            calls.append(f"end:{incoming.text}")
+            return None
+
+    class FakeBot:
+        async def send(self, event, message):
+            raise AssertionError("should not send")
+
+    def event(text: str):
+        return SimpleNamespace(
+            message_type="private",
+            user_id=99,
+            sender=SimpleNamespace(nickname="Amy"),
+            time=123,
+            message=[SimpleNamespace(type="text", data={"text": text})],
+            get_plaintext=lambda: text,
+        )
+
+    monkeypatch.setattr(module, "service", FakeService())
+
+    first = asyncio.create_task(module.handle_message(FakeBot(), event("first")))
+    await first_started.wait()
+    second = asyncio.create_task(module.handle_message(FakeBot(), event("second")))
+    await asyncio.sleep(0.01)
+
+    assert calls == ["start:first"]
+
+    release_first.set()
+    await asyncio.gather(first, second)
+
+    assert calls == ["start:first", "end:first", "start:second", "end:second"]
+
+
+async def test_handle_message_serializes_same_group_chat(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+    calls = []
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    class FakeService:
+        async def handle(self, incoming, *, random_value: int):
+            calls.append(f"start:{incoming.user_id}:{incoming.text}")
+            if incoming.text == "first":
+                first_started.set()
+                await release_first.wait()
+            calls.append(f"end:{incoming.user_id}:{incoming.text}")
+            return None
+
+    class FakeBot:
+        async def send(self, event, message):
+            raise AssertionError("should not send")
+
+    def event(text: str, user_id: int):
+        return SimpleNamespace(
+            message_type="group",
+            group_id=20,
+            user_id=user_id,
+            sender=SimpleNamespace(nickname="Amy", card=""),
+            time=123,
+            to_me=True,
+            message=[SimpleNamespace(type="text", data={"text": text})],
+            get_plaintext=lambda: text,
+        )
+
+    monkeypatch.setattr(module, "service", FakeService())
+
+    first = asyncio.create_task(module.handle_message(FakeBot(), event("first", 99)))
+    await first_started.wait()
+    second = asyncio.create_task(module.handle_message(FakeBot(), event("second", 100)))
+    await asyncio.sleep(0.01)
+
+    assert calls == ["start:99:first"]
+
+    release_first.set()
+    await asyncio.gather(first, second)
+
+    assert calls == [
+        "start:99:first",
+        "end:99:first",
+        "start:100:second",
+        "end:100:second",
+    ]
+
+
+async def test_handle_message_allows_different_private_chats_in_parallel(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+    calls = []
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    class FakeService:
+        async def handle(self, incoming, *, random_value: int):
+            calls.append(f"start:{incoming.user_id}:{incoming.text}")
+            if incoming.text == "first":
+                first_started.set()
+                await release_first.wait()
+            if incoming.text == "second":
+                second_started.set()
+            calls.append(f"end:{incoming.user_id}:{incoming.text}")
+            return None
+
+    class FakeBot:
+        async def send(self, event, message):
+            raise AssertionError("should not send")
+
+    def event(text: str, user_id: int):
+        return SimpleNamespace(
+            message_type="private",
+            user_id=user_id,
+            sender=SimpleNamespace(nickname="Amy"),
+            time=123,
+            message=[SimpleNamespace(type="text", data={"text": text})],
+            get_plaintext=lambda: text,
+        )
+
+    monkeypatch.setattr(module, "service", FakeService())
+
+    first = asyncio.create_task(module.handle_message(FakeBot(), event("first", 99)))
+    await first_started.wait()
+    second = asyncio.create_task(module.handle_message(FakeBot(), event("second", 100)))
+    await asyncio.wait_for(second_started.wait(), timeout=1)
+
+    assert calls == ["start:99:first", "start:100:second", "end:100:second"]
+
+    release_first.set()
+    await asyncio.gather(first, second)
+
+    assert calls == [
+        "start:99:first",
+        "start:100:second",
+        "end:100:second",
+        "end:99:first",
+    ]
 
 
 def test_plugin_does_not_mark_reply_to_other_user_as_reply_to_bot(monkeypatch) -> None:

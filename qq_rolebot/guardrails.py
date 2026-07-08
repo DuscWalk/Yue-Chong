@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 LEAK_PREFIXES = (
     "system prompt",
     "developer message",
@@ -8,6 +10,8 @@ LEAK_PREFIXES = (
     "stack trace",
     "traceback",
 )
+
+LEADING_ACTION_PATTERN = re.compile(r"^\s*[（(][^）)]{1,40}[）)]\s*")
 
 
 def clean_response(
@@ -19,6 +23,11 @@ def clean_response(
     if text is None:
         return None
     cleaned = " ".join(text.strip().split())
+    while True:
+        stripped = LEADING_ACTION_PATTERN.sub("", cleaned, count=1).strip()
+        if stripped == cleaned:
+            break
+        cleaned = stripped
     if not cleaned:
         return None
     lowered = cleaned.lower()
