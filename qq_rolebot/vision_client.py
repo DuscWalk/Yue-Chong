@@ -28,6 +28,7 @@ class VisionClient:
         model_name: str,
         timeout_seconds: int,
         max_images: int,
+        mode: str = "hybrid",
         enable_thinking: bool = True,
         enable_search: bool = True,
         video_fps: float = 2.0,
@@ -39,6 +40,7 @@ class VisionClient:
         self.model_name = model_name
         self.timeout_seconds = timeout_seconds
         self.max_images = max_images
+        self.mode = mode
         self.enable_thinking = enable_thinking
         self.enable_search = enable_search
         self.video_fps = video_fps
@@ -60,6 +62,7 @@ class VisionClient:
                 "image_urls": images,
                 "video_urls": videos,
                 "max_images": self.max_images,
+                "mode": self.mode,
                 "enable_thinking": self.enable_thinking,
                 "enable_search": self.enable_search,
                 "video_fps": self.video_fps,
@@ -74,22 +77,28 @@ class VisionClient:
         media_summary = ""
         search_summary = ""
 
-        media = await self._describe_media(prepared_images, videos, trace=trace)
-        if media.ok and media.summary:
-            media_summary = media.summary
-        elif media.error:
-            errors.append(media.error)
+        if self.mode != "search_only":
+            media = await self._describe_media(prepared_images, videos, trace=trace)
+            if media.ok and media.summary:
+                media_summary = media.summary
+            elif media.error:
+                errors.append(media.error)
+        else:
+            self._trace(trace, "vision.media.skipped", {"reason": "search_only mode"})
 
-        search = await self._search_images_with_timeout(
-            prepared_images,
-            videos,
-            trace=trace,
-            timeout_seconds=self.search_timeout_seconds,
-        )
-        if search.ok and search.summary:
-            search_summary = search.summary
-        elif search.error:
-            errors.append(search.error)
+        if self.mode != "media_only":
+            search = await self._search_images_with_timeout(
+                prepared_images,
+                videos,
+                trace=trace,
+                timeout_seconds=self.search_timeout_seconds,
+            )
+            if search.ok and search.summary:
+                search_summary = search.summary
+            elif search.error:
+                errors.append(search.error)
+        else:
+            self._trace(trace, "vision.search.skipped", {"reason": "media_only mode"})
 
         summaries: list[str] = []
         if search_summary:

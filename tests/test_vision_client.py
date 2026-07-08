@@ -150,6 +150,44 @@ async def test_vision_client_sends_video_and_search_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_vision_client_search_only_skips_media_description() -> None:
+    captured: dict[str, bytes] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "qq-image.example.test":
+            return httpx.Response(
+                200,
+                content=b"\xff\xd8\xff\xe0fake-jpeg",
+                headers={"Content-Type": "image/jpeg"},
+            )
+        captured[request.url.path] = request.read()
+        if request.url.path == "/v1/chat/completions":
+            raise AssertionError("search_only mode must not call media description")
+        if request.url.path == "/v1/responses":
+            return httpx.Response(200, json={"output_text": "图搜显示这是蕾缪安宣传海报。"})
+        return httpx.Response(404)
+
+    client = VisionClient(
+        api_base="https://vision.example.test/v1",
+        api_key="vision-secret",
+        model_name="qwen3.7-plus",
+        timeout_seconds=5,
+        max_images=1,
+        enable_thinking=True,
+        enable_search=True,
+        mode="search_only",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.describe(["https://qq-image.example.test/a.png"])
+
+    assert result.ok is True
+    assert result.summary == "图搜结果（与纯视觉描述冲突时优先参考）：图搜显示这是蕾缪安宣传海报。"
+    assert "/v1/chat/completions" not in captured
+    assert "/v1/responses" in captured
+
+
+@pytest.mark.asyncio
 async def test_vision_client_uses_configured_search_timeout() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "example.test":

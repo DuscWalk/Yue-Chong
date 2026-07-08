@@ -125,7 +125,8 @@ Vision:
 VISION_MODEL_ENABLED=false
 VISION_MODEL_API_BASE=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 VISION_MODEL_API_KEY=
-VISION_MODEL_NAME=qwen3.6-plus
+VISION_MODEL_NAME=qwen3.7-plus
+VISION_MODEL_MODE=hybrid
 VISION_MODEL_TIMEOUT_SECONDS=60
 VISION_MODEL_SEARCH_TIMEOUT_SECONDS=90
 VISION_MODEL_MAX_IMAGES=2
@@ -137,7 +138,7 @@ DEBUG_TRACE_DIR=data/debug_traces
 DEBUG_TRACE_RETENTION_SECONDS=86400
 ```
 
-When enabled, visual understanding runs only after the bot has decided to reply. It summarizes current HTTP image, GIF, and video URLs for the main chat model. If a user replies to an image and asks the bot about it, the replied message's media is used before any recent-text fallback. Static images are downloaded once and reused as `data:` inputs for both visual summary and image/web search. Optional image/web search can add source or meme context before the pure visual description; if they conflict, the main model is told to prefer the search result. It does not replace the main roleplay model.
+When enabled, visual understanding runs only after the bot has decided to reply. It summarizes current HTTP image, GIF, and video URLs for the main chat model. If a user replies to an image and asks the bot about it, the replied message's media is used before any recent-text fallback. Static images are downloaded once and reused as `data:` inputs for both visual summary and image/web search. Optional image/web search can add source or meme context before the pure visual description; if they conflict, the main model is told to prefer the search result. `VISION_MODEL_MODE=search_only` skips the pure visual-description call and uses only image/web search for source, character, and meme-background questions. It does not replace the main roleplay model.
 
 Debug traces are always written to `DEBUG_TRACE_DIR` as per-message JSONL files. They include incoming content, media URLs, media source, replied message id, vision/search outputs, final model prompt, model response, and final reply. API keys and Authorization headers are not written. Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned when new trace events are written.
 
@@ -365,7 +366,8 @@ Use an OpenAI-compatible vision model when the bot should understand images or m
 VISION_MODEL_ENABLED=true
 VISION_MODEL_API_BASE=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 VISION_MODEL_API_KEY=
-VISION_MODEL_NAME=qwen3.6-plus
+VISION_MODEL_NAME=qwen3.7-plus
+VISION_MODEL_MODE=hybrid
 VISION_MODEL_TIMEOUT_SECONDS=60
 VISION_MODEL_SEARCH_TIMEOUT_SECONDS=90
 VISION_MODEL_MAX_IMAGES=2
@@ -374,7 +376,7 @@ VISION_MODEL_ENABLE_SEARCH=true
 VISION_MODEL_VIDEO_FPS=2
 ```
 
-Keep the real API key only in `/opt/qq-rolebot/.env`. The bot sends only current-message or replied-message HTTP media after reply triggering. Messages in the same private chat or same group are handled sequentially, so text follow-ups wait for earlier image recognition in that chat while other chats can continue. Static images are downloaded in memory and reused as `data:` image inputs for visual summary and image/web search; the downloaded bytes are not persisted, and trace logs redact the base64 payload. Successful image summaries are saved as short-lived text context keyed by their `[image: ...]` or `[video: ...]` marker, so follow-up questions can reuse the latest summary and replies to a previously summarized image can reuse the matching summary without re-identifying it. OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` use `video_url`. With `VISION_MODEL_ENABLE_SEARCH=true`, image/web search may add a short source or meme-context summary before the pure visual description; if they conflict, the main model is told to prefer the search result. The final reply still comes from the main chat model.
+Keep the real API key only in `/opt/qq-rolebot/.env`. The bot sends only current-message or replied-message HTTP media after reply triggering. Messages in the same private chat or same group are handled sequentially, so text follow-ups wait for earlier image recognition in that chat while other chats can continue. Static images are downloaded in memory and reused as `data:` image inputs for visual summary and image/web search; the downloaded bytes are not persisted, and trace logs redact the base64 payload. Successful image summaries are saved as short-lived text context keyed by their `[image: ...]` or `[video: ...]` marker, so follow-up questions can reuse the latest summary and replies to a previously summarized image can reuse the matching summary without re-identifying it. OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` use `video_url`. With `VISION_MODEL_ENABLE_SEARCH=true`, image/web search may add a short source or meme-context summary before the pure visual description; if they conflict, the main model is told to prefer the search result. Set `VISION_MODEL_MODE=search_only` to skip pure visual description and use only image/web search. The final reply still comes from the main chat model.
 
 ## 10. Optional TTS Backends
 
