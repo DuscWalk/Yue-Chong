@@ -149,6 +149,8 @@ def test_load_settings_reads_tts_defaults() -> None:
     assert settings.vision_model_enable_thinking is True
     assert settings.vision_model_enable_search is True
     assert settings.vision_model_video_fps == 2.0
+    assert settings.debug_trace_dir.as_posix() == "data/debug_traces"
+    assert settings.debug_trace_retention_seconds == 86_400
 
 
 def test_load_settings_reads_tts_overrides() -> None:
@@ -215,6 +217,21 @@ def test_load_settings_reads_vision_model_overrides() -> None:
     assert settings.vision_model_enable_thinking is False
     assert settings.vision_model_enable_search is False
     assert settings.vision_model_video_fps == 4.5
+
+
+def test_load_settings_reads_debug_trace_overrides() -> None:
+    env = complete_env()
+    env.update(
+        {
+            "DEBUG_TRACE_DIR": "data/test_debug_traces",
+            "DEBUG_TRACE_RETENTION_SECONDS": "60",
+        }
+    )
+
+    settings = load_settings(env)
+
+    assert settings.debug_trace_dir.as_posix() == "data/test_debug_traces"
+    assert settings.debug_trace_retention_seconds == 60
 
 
 def test_load_settings_rejects_missing_required_value() -> None:
@@ -311,4 +328,12 @@ def test_load_settings_rejects_invalid_vision_model_limits() -> None:
     env["VISION_MODEL_VIDEO_FPS"] = "11"
 
     with pytest.raises(ConfigError, match="VISION_MODEL_VIDEO_FPS"):
+        load_settings(env)
+
+
+def test_load_settings_rejects_invalid_debug_trace_retention() -> None:
+    env = complete_env()
+    env["DEBUG_TRACE_RETENTION_SECONDS"] = "0"
+
+    with pytest.raises(ConfigError, match="DEBUG_TRACE_RETENTION_SECONDS"):
         load_settings(env)

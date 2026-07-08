@@ -129,9 +129,14 @@ VISION_MODEL_MAX_IMAGES=2
 VISION_MODEL_ENABLE_THINKING=true
 VISION_MODEL_ENABLE_SEARCH=true
 VISION_MODEL_VIDEO_FPS=2
+
+DEBUG_TRACE_DIR=data/debug_traces
+DEBUG_TRACE_RETENTION_SECONDS=86400
 ```
 
 When enabled, visual understanding runs only after the bot has decided to reply. It summarizes current HTTP image, GIF, and video URLs for the main chat model. Optional image/web search can add source or meme context; it does not replace the main roleplay model.
+
+Debug traces are always written to `DEBUG_TRACE_DIR` as per-message JSONL files. They include incoming content, media URLs, vision/search outputs, final model prompt, model response, and final reply. API keys and Authorization headers are not written. Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned when new trace events are written.
 
 Voice:
 

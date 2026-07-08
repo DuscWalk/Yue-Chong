@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
+from qq_rolebot.debug_trace import DebugTrace
 
 
 @dataclass(frozen=True)
@@ -42,32 +45,56 @@ class VisionClient:
         self,
         image_urls: list[str],
         video_urls: list[str] | None = None,
+        trace: DebugTrace | None = None,
     ) -> VisionResult:
         images = self._http_urls(image_urls)[: self.max_images]
         videos = self._http_urls(video_urls or [])[: self.max_images]
+        self._trace(
+            trace,
+            "vision.describe.start",
+            {
+                "image_urls": images,
+                "video_urls": videos,
+                "max_images": self.max_images,
+                "enable_thinking": self.enable_thinking,
+                "enable_search": self.enable_search,
+                "video_fps": self.video_fps,
+            },
+        )
         if not images and not videos:
+            self._trace(trace, "vision.describe.result", {"ok": False, "error": "no media urls"})
             return VisionResult(ok=False, error="no media urls")
 
         summaries: list[str] = []
         errors: list[str] = []
 
-        media = await self._describe_media(images, videos)
+        media = await self._describe_media(images, videos, trace=trace)
         if media.ok and media.summary:
             summaries.append(media.summary)
         elif media.error:
             errors.append(media.error)
 
-        search = await self._search_images(images, videos)
+        search = await self._search_images(images, videos, trace=trace)
         if search.ok and search.summary:
             summaries.append(search.summary)
         elif search.error:
             errors.append(search.error)
 
         if summaries:
-            return VisionResult(ok=True, summary="\n".join(summaries))
-        return VisionResult(ok=False, error="; ".join(errors) or "empty vision response")
+            summary = "\n".join(summaries)
+            self._trace(trace, "vision.describe.result", {"ok": True, "summary": summary})
+            return VisionResult(ok=True, summary=summary)
+        error = "; ".join(errors) or "empty vision response"
+        self._trace(trace, "vision.describe.result", {"ok": False, "error": error})
+        return VisionResult(ok=False, error=error)
 
-    async def _describe_media(self, image_urls: list[str], video_urls: list[str]) -> VisionResult:
+    async def _describe_media(
+        self,
+        image_urls: list[str],
+        video_urls: list[str],
+        *,
+        trace: DebugTrace | None,
+    ) -> VisionResult:
         content: list[dict[str, Any]] = [
             {
                 "type": "text",
@@ -93,33 +120,82 @@ class VisionClient:
             "temperature": 0.2,
             "enable_thinking": self.enable_thinking,
         }
+        self._trace(
+            trace,
+            "vision.media.request",
+            {"path": "/chat/completions", "payload": payload},
+        )
 
+        started = time.monotonic()
         try:
             data = await self._post_json("/chat/completions", payload)
         except Exception as exc:
+            self._trace(
+                trace,
+                "vision.media.result",
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "elapsed_ms": self._elapsed_ms(started),
+                },
+            )
             return VisionResult(ok=False, error=str(exc))
 
         try:
             summary = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
+            self._trace(
+                trace,
+                "vision.media.result",
+                {
+                    "ok": False,
+                    "error": f"invalid vision response: {exc}",
+                    "response": data,
+                    "elapsed_ms": self._elapsed_ms(started),
+                },
+            )
             return VisionResult(ok=False, error=f"invalid vision response: {exc}")
 
         text = str(summary).strip()
         if not text:
+            self._trace(
+                trace,
+                "vision.media.result",
+                {
+                    "ok": False,
+                    "error": "empty vision response",
+                    "response": data,
+                    "elapsed_ms": self._elapsed_ms(started),
+                },
+            )
             return VisionResult(ok=False, error="empty vision response")
+        self._trace(
+            trace,
+            "vision.media.result",
+            {
+                "ok": True,
+                "summary": text,
+                "response": data,
+                "elapsed_ms": self._elapsed_ms(started),
+            },
+        )
         return VisionResult(ok=True, summary=text)
 
     async def _search_images(
         self,
         image_urls: list[str],
         video_urls: list[str],
+        *,
+        trace: DebugTrace | None,
     ) -> VisionResult:
         if not self.enable_search:
+            self._trace(trace, "vision.search.skipped", {"reason": "vision search disabled"})
             return VisionResult(ok=False, error="vision search disabled")
 
         search_urls = [*image_urls, *[url for url in video_urls if self._is_gif_url(url)]]
         search_urls = search_urls[: self.max_images]
         if not search_urls:
+            self._trace(trace, "vision.search.skipped", {"reason": "no searchable image urls"})
             return VisionResult(ok=False, error="no searchable image urls")
 
         content: list[dict[str, Any]] = [
@@ -138,15 +214,46 @@ class VisionClient:
             "tools": [{"type": "image_search"}, {"type": "web_search"}],
             "enable_thinking": self.enable_thinking,
         }
+        self._trace(trace, "vision.search.request", {"path": "/responses", "payload": payload})
 
+        started = time.monotonic()
         try:
             data = await self._post_json("/responses", payload)
         except Exception as exc:
+            self._trace(
+                trace,
+                "vision.search.result",
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "elapsed_ms": self._elapsed_ms(started),
+                },
+            )
             return VisionResult(ok=False, error=str(exc))
 
         text = self._response_text(data).strip()
         if not text:
+            self._trace(
+                trace,
+                "vision.search.result",
+                {
+                    "ok": False,
+                    "error": "empty vision search response",
+                    "response": data,
+                    "elapsed_ms": self._elapsed_ms(started),
+                },
+            )
             return VisionResult(ok=False, error="empty vision search response")
+        self._trace(
+            trace,
+            "vision.search.result",
+            {
+                "ok": True,
+                "summary": text,
+                "response": data,
+                "elapsed_ms": self._elapsed_ms(started),
+            },
+        )
         return VisionResult(ok=True, summary=text)
 
     async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -196,3 +303,12 @@ class VisionClient:
                     if isinstance(text, str):
                         parts.append(text)
         return "\n".join(parts)
+
+    @staticmethod
+    def _trace(trace: DebugTrace | None, name: str, data: dict[str, Any]) -> None:
+        if trace is not None:
+            trace.event(name, data)
+
+    @staticmethod
+    def _elapsed_ms(started: float) -> int:
+        return round((time.monotonic() - started) * 1000)

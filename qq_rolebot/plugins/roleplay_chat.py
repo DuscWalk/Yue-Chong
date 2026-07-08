@@ -7,6 +7,7 @@ from nonebot import get_driver, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
 
 from qq_rolebot.config import load_settings
+from qq_rolebot.debug_trace import DebugTraceLogger
 from qq_rolebot.message_segments import extract_media_urls, is_reply_to, summarize_segments
 from qq_rolebot.model_client import ModelClient
 from qq_rolebot.persona import load_persona
@@ -89,6 +90,10 @@ service = ChatService(
         trigger_keywords=settings.followup_trigger_keywords,
     ),
     vision_client=vision_client,
+    trace_logger=DebugTraceLogger(
+        root_dir=settings.debug_trace_dir,
+        retention_seconds=settings.debug_trace_retention_seconds,
+    ),
 )
 voice_service = None
 if settings.tts_enabled and settings.tts_api_url:

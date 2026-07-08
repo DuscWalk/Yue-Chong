@@ -113,6 +113,8 @@ class Settings:
     vision_model_enable_thinking: bool
     vision_model_enable_search: bool
     vision_model_video_fps: float
+    debug_trace_dir: Path
+    debug_trace_retention_seconds: int
     followup_window_seconds: int
     followup_trigger_keywords: list[str]
 
@@ -165,6 +167,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     vision_model_video_fps = _float(env, "VISION_MODEL_VIDEO_FPS", 2.0)
     if vision_model_video_fps <= 0 or vision_model_video_fps > 10:
         raise ConfigError("VISION_MODEL_VIDEO_FPS must be greater than 0 and at most 10")
+
+    debug_trace_retention_seconds = _int(env, "DEBUG_TRACE_RETENTION_SECONDS", 86_400)
+    if debug_trace_retention_seconds < 1:
+        raise ConfigError("DEBUG_TRACE_RETENTION_SECONDS must be greater than 0")
 
     tts_max_chars = _int(env, "TTS_MAX_CHARS", 80)
     if tts_max_chars < 1:
@@ -259,6 +265,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         vision_model_enable_thinking=_bool(env, "VISION_MODEL_ENABLE_THINKING", True),
         vision_model_enable_search=_bool(env, "VISION_MODEL_ENABLE_SEARCH", True),
         vision_model_video_fps=vision_model_video_fps,
+        debug_trace_dir=Path(env.get("DEBUG_TRACE_DIR", "data/debug_traces")),
+        debug_trace_retention_seconds=debug_trace_retention_seconds,
         followup_window_seconds=followup_window_seconds,
         followup_trigger_keywords=parse_str_list(
             env.get(

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from qq_rolebot.config import load_settings
+from qq_rolebot.debug_trace import DebugTraceLogger
 from qq_rolebot.model_client import ModelResult
 from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter
 from qq_rolebot.service import ChatService
@@ -57,10 +58,17 @@ class FakeVisionClient:
         self.image_urls: list[str] = []
         self.video_urls: list[str] = []
 
-    async def describe(self, image_urls: list[str], video_urls: list[str] | None = None):
+    async def describe(
+        self,
+        image_urls: list[str],
+        video_urls: list[str] | None = None,
+        trace=None,
+    ):
         self.calls += 1
         self.image_urls = image_urls
         self.video_urls = video_urls or []
+        if trace is not None:
+            trace.event("vision.fake", {"summary": self.summary})
 
         class Result:
             def __init__(self, summary: str) -> None:
@@ -114,7 +122,13 @@ def msg(
     )
 
 
-def private_msg(text: str, *, sender: int = 99) -> IncomingMessage:
+def private_msg(
+    text: str,
+    *,
+    sender: int = 99,
+    image_urls: list[str] | None = None,
+    video_urls: list[str] | None = None,
+) -> IncomingMessage:
     return IncomingMessage(
         group_id=0,
         user_id=sender,
@@ -123,7 +137,15 @@ def private_msg(text: str, *, sender: int = 99) -> IncomingMessage:
         is_at_bot=False,
         is_private=True,
         created_at=100,
+        image_urls=image_urls or [],
+        video_urls=video_urls or [],
     )
+
+
+def trace_text(path: Path) -> str:
+    files = list(path.glob("*.jsonl"))
+    assert len(files) == 1
+    return files[0].read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -512,6 +534,44 @@ async def test_service_passes_vision_context_to_model_after_trigger(tmp_path: Pa
     assert vision.image_urls == ["https://example.test/cat.jpg"]
     assert "Vision Context:" in model.messages[0]["content"]
     assert "图片里是一张猫猫表情包，看起来很累。" in model.messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_service_traces_private_prompt_model_response_and_reply(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    model = CapturingModel()
+    trace_logger = DebugTraceLogger(root_dir=tmp_path / "traces", now=lambda: 200_000)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+        vision_client=FakeVisionClient(summary="视觉识别：图里是令。"),
+        trace_logger=trace_logger,
+    )
+
+    reply = await service.handle(
+        private_msg(
+            "[image: https://example.test/private-image.png]这是哪个",
+            image_urls=["https://example.test/private-image.png"],
+        ),
+        random_value=99,
+    )
+
+    assert reply == "model reply"
+    raw = trace_text(tmp_path / "traces")
+    assert "message.received" in raw
+    assert "Private Amy" in raw
+    assert "vision.fake" in raw
+    assert "视觉识别：图里是令。" in raw
+    assert "vision.context" in raw
+    assert "model.prompt" in raw
+    assert "Vision Context:" in raw
+    assert "model.response" in raw
+    assert "model reply" in raw
+    assert "reply.final" in raw
 
 
 @pytest.mark.asyncio
