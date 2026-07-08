@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 import pytest
 
@@ -43,6 +45,8 @@ async def test_vision_client_sends_image_urls_and_returns_summary() -> None:
     payload = captured["payload"].decode("utf-8")
     assert '"model":"qwen3.6-plus"' in payload
     assert '"type":"image_url"' in payload
+    assert "具体名称" in payload
+    assert "不要只凭相似风格" in payload
     assert "https://example.test/a.jpg" in payload
     assert "https://example.test/b.jpg" not in payload
 
@@ -132,6 +136,45 @@ async def test_vision_client_sends_video_and_search_context() -> None:
     assert '"type":"input_image"' in search_payload
     assert "https://example.test/a.jpg" in search_payload
     assert "https://example.test/b.jpg" not in search_payload
+
+
+@pytest.mark.asyncio
+async def test_vision_client_does_not_block_on_slow_search_after_media_summary() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "example.test":
+            return httpx.Response(
+                200,
+                content=b"\xff\xd8\xff\xe0fake-jpeg",
+                headers={"Content-Type": "image/jpeg"},
+            )
+        if request.url.path == "/v1/chat/completions":
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "图里是重岳。"}}]},
+            )
+        if request.url.path == "/v1/responses":
+            await asyncio.sleep(10)
+            return httpx.Response(200, json={"output_text": "搜索结果来晚了。"})
+        return httpx.Response(404)
+
+    client = VisionClient(
+        api_base="https://vision.example.test/v1",
+        api_key="vision-secret",
+        model_name="qwen3.6-flash",
+        timeout_seconds=5,
+        max_images=1,
+        enable_search=True,
+        search_after_media_timeout_seconds=0.01,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await asyncio.wait_for(
+        client.describe(["https://example.test/chongyue.jpg"]),
+        timeout=0.3,
+    )
+
+    assert result.ok is True
+    assert result.summary == "图里是重岳。"
 
 
 @pytest.mark.asyncio

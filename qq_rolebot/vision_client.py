@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
 from dataclasses import dataclass
@@ -30,6 +31,7 @@ class VisionClient:
         enable_thinking: bool = True,
         enable_search: bool = True,
         video_fps: float = 2.0,
+        search_after_media_timeout_seconds: float = 12.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.api_base = api_base.rstrip("/")
@@ -40,6 +42,7 @@ class VisionClient:
         self.enable_thinking = enable_thinking
         self.enable_search = enable_search
         self.video_fps = video_fps
+        self.search_after_media_timeout_seconds = search_after_media_timeout_seconds
         self.transport = transport
 
     async def describe(
@@ -70,12 +73,21 @@ class VisionClient:
         errors: list[str] = []
 
         media = await self._describe_media(images, videos, trace=trace)
+        has_media_summary = False
         if media.ok and media.summary:
+            has_media_summary = True
             summaries.append(media.summary)
         elif media.error:
             errors.append(media.error)
 
-        search = await self._search_images(images, videos, trace=trace)
+        search = await self._search_images_with_timeout(
+            images,
+            videos,
+            trace=trace,
+            timeout_seconds=(
+                self.search_after_media_timeout_seconds if has_media_summary else None
+            ),
+        )
         if search.ok and search.summary:
             summaries.append(search.summary)
         elif search.error:
@@ -102,8 +114,10 @@ class VisionClient:
                 "type": "text",
                 "text": (
                     "请用简体中文客观概括这些聊天图片、表情包、动图或视频。"
-                    "只描述可见内容、文字、动作和情绪，不要扮演角色，不要编造。"
-                    "看不清或无法识别时请明确说不确定。100字以内。"
+                    "如果能从画面、文字、标识或常识可靠识别作品、角色、人物、物品、地点或梗图来源，"
+                    "请先给出具体名称和判断依据。用户问“是谁”“哪个”“什么”时，优先回答可识别名称。"
+                    "再描述可见内容、文字、动作和情绪。不要扮演角色，不要只凭相似风格或主观猜测。"
+                    "看不清或无法识别时请明确说不确定。140字以内。"
                 ),
             }
         ]
@@ -184,6 +198,36 @@ class VisionClient:
             },
         )
         return VisionResult(ok=True, summary=text)
+
+    async def _search_images_with_timeout(
+        self,
+        image_urls: list[str],
+        video_urls: list[str],
+        *,
+        trace: DebugTrace | None,
+        timeout_seconds: float | None,
+    ) -> VisionResult:
+        if timeout_seconds is None:
+            return await self._search_images(image_urls, video_urls, trace=trace)
+
+        started = time.monotonic()
+        try:
+            return await asyncio.wait_for(
+                self._search_images(image_urls, video_urls, trace=trace),
+                timeout=timeout_seconds,
+            )
+        except TimeoutError:
+            self._trace(
+                trace,
+                "vision.search.result",
+                {
+                    "ok": False,
+                    "error": "opportunistic vision search timed out",
+                    "error_type": "TimeoutError",
+                    "elapsed_ms": self._elapsed_ms(started),
+                },
+            )
+            return VisionResult(ok=False, error="opportunistic vision search timed out")
 
     async def _search_images(
         self,
