@@ -27,8 +27,17 @@ class MediaUrls:
 
 
 def _data(segment: Any) -> dict[str, Any]:
+    if isinstance(segment, dict):
+        data = segment.get("data", {})
+        return data if isinstance(data, dict) else {}
     data = getattr(segment, "data", {})
     return data if isinstance(data, dict) else {}
+
+
+def _segment_type(segment: Any) -> str:
+    if isinstance(segment, dict):
+        return str(segment.get("type", "unknown"))
+    return str(getattr(segment, "type", "unknown"))
 
 
 def _first_value(data: dict[str, Any], keys: tuple[str, ...]) -> str:
@@ -51,7 +60,7 @@ def _is_dynamic_media_url(value: str) -> bool:
 def summarize_segments(message: Iterable[Any]) -> str:
     parts: list[str] = []
     for segment in message:
-        segment_type = str(getattr(segment, "type", "unknown"))
+        segment_type = _segment_type(segment)
         data = _data(segment)
         if segment_type == "text":
             parts.append(str(data.get("text", "")))
@@ -88,7 +97,7 @@ def extract_media_urls(message: Iterable[Any]) -> MediaUrls:
     image_urls: list[str] = []
     video_urls: list[str] = []
     for segment in message:
-        segment_type = str(getattr(segment, "type", "unknown"))
+        segment_type = _segment_type(segment)
         data = _data(segment)
         label = _first_value(data, ("url", "file"))
         if not _is_http_url(label):
@@ -103,4 +112,12 @@ def extract_media_urls(message: Iterable[Any]) -> MediaUrls:
 
 
 def is_reply_to(message: Iterable[Any]) -> bool:
-    return any(str(getattr(segment, "type", "")) == "reply" for segment in message)
+    return any(_segment_type(segment) == "reply" for segment in message)
+
+
+def extract_reply_message_id(message: Iterable[Any]) -> str:
+    for segment in message:
+        if _segment_type(segment) != "reply":
+            continue
+        return _first_value(_data(segment), ("id", "message_id"))
+    return ""

@@ -25,6 +25,8 @@ class IncomingMessage:
     is_reply_to_bot: bool = False
     image_urls: list[str] = field(default_factory=list)
     video_urls: list[str] = field(default_factory=list)
+    media_source: str = ""
+    reply_message_id: str = ""
 
 
 @dataclass(frozen=True)

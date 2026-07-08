@@ -137,9 +137,9 @@ DEBUG_TRACE_DIR=data/debug_traces
 DEBUG_TRACE_RETENTION_SECONDS=86400
 ```
 
-When enabled, visual understanding runs only after the bot has decided to reply. It summarizes current HTTP image, GIF, and video URLs for the main chat model. Static images are downloaded once and reused as `data:` inputs for both visual summary and image/web search. Optional image/web search can add source or meme context before the pure visual description; if they conflict, the main model is told to prefer the search result. It does not replace the main roleplay model.
+When enabled, visual understanding runs only after the bot has decided to reply. It summarizes current HTTP image, GIF, and video URLs for the main chat model. If a user replies to an image and asks the bot about it, the replied message's media is used before any recent-text fallback. Static images are downloaded once and reused as `data:` inputs for both visual summary and image/web search. Optional image/web search can add source or meme context before the pure visual description; if they conflict, the main model is told to prefer the search result. It does not replace the main roleplay model.
 
-Debug traces are always written to `DEBUG_TRACE_DIR` as per-message JSONL files. They include incoming content, media URLs, vision/search outputs, final model prompt, model response, and final reply. API keys and Authorization headers are not written. Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned when new trace events are written.
+Debug traces are always written to `DEBUG_TRACE_DIR` as per-message JSONL files. They include incoming content, media URLs, media source, replied message id, vision/search outputs, final model prompt, model response, and final reply. API keys and Authorization headers are not written. Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned when new trace events are written.
 
 Voice:
 
@@ -374,7 +374,7 @@ VISION_MODEL_ENABLE_SEARCH=true
 VISION_MODEL_VIDEO_FPS=2
 ```
 
-Keep the real API key only in `/opt/qq-rolebot/.env`. The bot sends only the current message's HTTP media after reply triggering. Static images are downloaded in memory and reused as `data:` image inputs for visual summary and image/web search; the downloaded bytes are not persisted, and trace logs redact the base64 payload. OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` use `video_url`. With `VISION_MODEL_ENABLE_SEARCH=true`, image/web search may add a short source or meme-context summary before the pure visual description; if they conflict, the main model is told to prefer the search result. The final reply still comes from the main chat model.
+Keep the real API key only in `/opt/qq-rolebot/.env`. The bot sends only current-message or replied-message HTTP media after reply triggering. Static images are downloaded in memory and reused as `data:` image inputs for visual summary and image/web search; the downloaded bytes are not persisted, and trace logs redact the base64 payload. OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` use `video_url`. With `VISION_MODEL_ENABLE_SEARCH=true`, image/web search may add a short source or meme-context summary before the pure visual description; if they conflict, the main model is told to prefer the search result. The final reply still comes from the main chat model.
 
 ## 10. Optional TTS Backends
 

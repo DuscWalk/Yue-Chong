@@ -156,6 +156,127 @@ def test_plugin_extracts_dynamic_media_into_incoming_message(monkeypatch) -> Non
     ]
 
 
+def test_plugin_uses_replied_message_image_urls(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    event = SimpleNamespace(
+        message_type="group",
+        group_id=20,
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy", card=""),
+        time=123,
+        to_me=True,
+        message=[
+            SimpleNamespace(type="reply", data={"id": "12345"}),
+            SimpleNamespace(type="text", data={"text": "这是谁"}),
+        ],
+        reply=SimpleNamespace(
+            sender=SimpleNamespace(user_id=42),
+            message=[
+                SimpleNamespace(type="image", data={"url": "https://example.test/quoted.jpg"})
+            ],
+        ),
+        get_plaintext=lambda: "这是谁",
+    )
+
+    incoming = module.build_incoming_message(event, bot_id=10001)
+
+    assert incoming.text == "这是谁"
+    assert incoming.image_urls == ["https://example.test/quoted.jpg"]
+    assert incoming.media_source == "replied_message"
+    assert incoming.reply_message_id == "12345"
+
+
+async def test_handle_message_fetches_replied_image_when_reply_payload_missing(
+    monkeypatch,
+) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+    seen = {}
+
+    class FakeService:
+        async def handle(self, incoming, *, random_value: int):
+            seen["incoming"] = incoming
+            return None
+
+    class FakeBot:
+        async def get_msg(self, *, message_id):
+            seen["message_id"] = message_id
+            return {
+                "message": [
+                    {
+                        "type": "image",
+                        "data": {"url": "https://example.test/fetched.jpg"},
+                    }
+                ]
+            }
+
+        async def send(self, event, message):
+            raise AssertionError("should not send")
+
+    event = SimpleNamespace(
+        message_type="group",
+        group_id=20,
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy", card=""),
+        time=123,
+        to_me=True,
+        message=[
+            SimpleNamespace(type="reply", data={"id": "12345"}),
+            SimpleNamespace(type="text", data={"text": "这是谁"}),
+        ],
+        reply=SimpleNamespace(sender=SimpleNamespace(user_id=42), message=[]),
+        get_plaintext=lambda: "这是谁",
+    )
+    monkeypatch.setattr(module, "service", FakeService())
+
+    await module.handle_message(FakeBot(), event)
+
+    assert seen["message_id"] == 12345
+    assert seen["incoming"].image_urls == ["https://example.test/fetched.jpg"]
+    assert seen["incoming"].media_source == "replied_message_fetch"
+    assert seen["incoming"].reply_message_id == "12345"
+
+
+async def test_handle_message_continues_when_replied_message_fetch_fails(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+    seen = {}
+
+    class FakeService:
+        async def handle(self, incoming, *, random_value: int):
+            seen["incoming"] = incoming
+            return None
+
+    class FakeBot:
+        async def get_msg(self, *, message_id):
+            raise RuntimeError("message expired")
+
+        async def send(self, event, message):
+            raise AssertionError("should not send")
+
+    event = SimpleNamespace(
+        message_type="group",
+        group_id=20,
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy", card=""),
+        time=123,
+        to_me=True,
+        message=[
+            SimpleNamespace(type="reply", data={"id": "12345"}),
+            SimpleNamespace(type="text", data={"text": "这是谁"}),
+        ],
+        reply=SimpleNamespace(sender=SimpleNamespace(user_id=42), message=[]),
+        get_plaintext=lambda: "这是谁",
+    )
+    monkeypatch.setattr(module, "service", FakeService())
+
+    await module.handle_message(FakeBot(), event)
+
+    assert seen["incoming"].image_urls == []
+    assert seen["incoming"].reply_message_id == "12345"
+
+
 def test_plugin_does_not_mark_reply_to_other_user_as_reply_to_bot(monkeypatch) -> None:
     set_env(monkeypatch)
     module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")

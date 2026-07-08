@@ -421,6 +421,8 @@ class ChatService:
                 "created_at": message.created_at,
                 "image_urls": message.image_urls,
                 "video_urls": message.video_urls,
+                "media_source": message.media_source,
+                "reply_message_id": message.reply_message_id,
             }
         )
 

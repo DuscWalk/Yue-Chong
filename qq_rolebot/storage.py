@@ -181,9 +181,10 @@ class Storage:
                     FROM message_context
                     WHERE group_id = ?
                       AND created_at >= ?
+                      AND created_at <= ?
                     ORDER BY created_at ASC, id ASC
                     """,
-                    (group_id, cutoff),
+                    (group_id, cutoff, now),
                 )
             return [
                 MessageRecord(

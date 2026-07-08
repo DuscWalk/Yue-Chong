@@ -106,7 +106,7 @@ Reply rules:
 - Group message from a non-whitelisted group: ignore.
 - Group disabled or muted: ignore normal chat.
 - `@` bot or reply to bot: reply when the group is enabled.
-- Context: user messages and successful bot replies are stored, but only messages within `CONTEXT_WINDOW_SECONDS` are included in the model prompt.
+- Context: user messages and successful bot replies are stored, but only messages within `CONTEXT_WINDOW_SECONDS` and not newer than the current message are included in the model prompt.
 - Follow-up window: after a user addresses the bot, their later message in the same group can trigger if it contains a question mark or one of `FOLLOWUP_TRIGGER_KEYWORDS`.
 - Repeat: if `REPEAT_REPLY_ENABLED=true`, the latest `REPEAT_REPLY_THRESHOLD` unaddressed group messages are identical, and at least two users joined the chain, reply with the same text.
 - Keywords: if `KEYWORDS` appears in text, reply.
@@ -161,6 +161,7 @@ Vision summary:
 
 - Enabled by `VISION_MODEL_ENABLED=true`.
 - Runs only after reply triggering and only for current messages with HTTP media URLs.
+- If a user replies to an image and asks the bot about it, the bot uses the replied message's media before falling back to recent text context.
 - Downloads static images in memory, sends the same `data:` inputs to both visual summary and image/web search, and does not persist the downloaded image bytes.
 - Sends OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` as `video_url`.
 - When `VISION_MODEL_ENABLE_SEARCH=true`, adds a short image/web search summary before the pure visual description; if they conflict, the main model is told to prefer the search result.
@@ -170,7 +171,7 @@ Debug traces:
 
 - Always enabled.
 - Written as per-message JSONL files under `DEBUG_TRACE_DIR`.
-- Include incoming message text/media URLs, vision recognition result, image/web search result, final model prompt, model response, and final cleaned reply.
+- Include incoming message text/media URLs, media source, replied message id, vision recognition result, image/web search result, final model prompt, model response, and final cleaned reply.
 - Downloaded image `data:` payloads are redacted in traces; fetch events keep only source URL, media type, byte count, and timing.
 - Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned whenever a new trace event is written.
 - API keys and Authorization headers are not written.

@@ -8,7 +8,13 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, Me
 
 from qq_rolebot.config import load_settings
 from qq_rolebot.debug_trace import DebugTraceLogger
-from qq_rolebot.message_segments import extract_media_urls, is_reply_to, summarize_segments
+from qq_rolebot.message_segments import (
+    MediaUrls,
+    extract_media_urls,
+    extract_reply_message_id,
+    is_reply_to,
+    summarize_segments,
+)
 from qq_rolebot.model_client import ModelClient
 from qq_rolebot.persona import load_persona
 from qq_rolebot.persona_sources import PersonaSourceClient
@@ -166,13 +172,72 @@ def is_reply_to_bot(event: MessageEvent, bot_id: int) -> bool:
     return bool(getattr(event, "to_me", False)) and is_reply_to(getattr(event, "message", []))
 
 
-def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage | None:
+def _has_media(media_urls: MediaUrls) -> bool:
+    return bool(media_urls.image_urls or media_urls.video_urls)
+
+
+def _reply_message_id(event: MessageEvent) -> str:
+    message_id = extract_reply_message_id(getattr(event, "message", []))
+    if message_id:
+        return message_id
+    reply = getattr(event, "reply", None)
+    for attr in ("message_id", "id"):
+        value = getattr(reply, attr, None)
+        if value:
+            return str(value)
+    return ""
+
+
+def _replied_message_media_urls(event: MessageEvent) -> MediaUrls:
+    reply = getattr(event, "reply", None)
+    reply_message = getattr(reply, "message", None)
+    if reply_message is None:
+        return MediaUrls()
+    return extract_media_urls(reply_message)
+
+
+def _message_from_get_msg_result(result) -> list:
+    if isinstance(result, dict):
+        message = result.get("message", [])
+    else:
+        message = getattr(result, "message", [])
+    return list(message) if message is not None else []
+
+
+async def fetch_replied_media_urls(bot: Bot, reply_message_id: str) -> MediaUrls:
+    if not reply_message_id:
+        return MediaUrls()
+    try:
+        message_id = int(reply_message_id)
+    except ValueError:
+        return MediaUrls()
+    try:
+        result = await bot.get_msg(message_id=message_id)
+    except Exception:
+        return MediaUrls()
+    return extract_media_urls(_message_from_get_msg_result(result))
+
+
+def build_incoming_message(
+    event: MessageEvent,
+    bot_id: int,
+    *,
+    fallback_media_urls: MediaUrls | None = None,
+    fallback_media_source: str = "",
+) -> IncomingMessage | None:
     text = extract_message_text(event)
     if not text:
         return None
 
     message_segments = getattr(event, "message", [])
     media_urls = extract_media_urls(message_segments)
+    media_source = "current_message" if _has_media(media_urls) else ""
+    reply_message_id = _reply_message_id(event)
+    if not _has_media(media_urls):
+        replied_media_urls = fallback_media_urls or _replied_message_media_urls(event)
+        if _has_media(replied_media_urls):
+            media_urls = replied_media_urls
+            media_source = fallback_media_source or "replied_message"
     sender = event.sender
     nickname = getattr(sender, "card", "") or getattr(sender, "nickname", "") or str(event.user_id)
     message_type = getattr(event, "message_type", "")
@@ -188,6 +253,8 @@ def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage 
             created_at=int(getattr(event, "time", int(time.time()))),
             image_urls=media_urls.image_urls,
             video_urls=media_urls.video_urls,
+            media_source=media_source,
+            reply_message_id=reply_message_id,
         )
 
     if message_type == "group":
@@ -201,6 +268,8 @@ def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage 
             created_at=int(getattr(event, "time", int(time.time()))),
             image_urls=media_urls.image_urls,
             video_urls=media_urls.video_urls,
+            media_source=media_source,
+            reply_message_id=reply_message_id,
         )
 
     return None
@@ -209,6 +278,15 @@ def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage 
 @matcher.handle()
 async def handle_message(bot: Bot, event: MessageEvent) -> None:
     incoming = build_incoming_message(event, settings.bot_qq)
+    if incoming is not None and not (incoming.image_urls or incoming.video_urls):
+        fetched_media_urls = await fetch_replied_media_urls(bot, incoming.reply_message_id)
+        if _has_media(fetched_media_urls):
+            incoming = build_incoming_message(
+                event,
+                settings.bot_qq,
+                fallback_media_urls=fetched_media_urls,
+                fallback_media_source="replied_message_fetch",
+            )
     if incoming is None:
         return
 
