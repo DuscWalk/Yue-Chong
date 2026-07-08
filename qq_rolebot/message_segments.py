@@ -1,7 +1,29 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
+
+_DYNAMIC_MEDIA_EXTENSIONS = {
+    ".gif",
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".avi",
+    ".mkv",
+    ".flv",
+    ".wmv",
+    ".m4v",
+    ".mpeg",
+    ".mpg",
+}
+
+
+@dataclass(frozen=True)
+class MediaUrls:
+    image_urls: list[str] = field(default_factory=list)
+    video_urls: list[str] = field(default_factory=list)
 
 
 def _data(segment: Any) -> dict[str, Any]:
@@ -15,6 +37,15 @@ def _first_value(data: dict[str, Any], keys: tuple[str, ...]) -> str:
         if value:
             return str(value)
     return ""
+
+
+def _is_http_url(value: str) -> bool:
+    return value.startswith(("http://", "https://"))
+
+
+def _is_dynamic_media_url(value: str) -> bool:
+    path = urlparse(value).path.lower()
+    return any(path.endswith(extension) for extension in _DYNAMIC_MEDIA_EXTENSIONS)
 
 
 def summarize_segments(message: Iterable[Any]) -> str:
@@ -32,6 +63,9 @@ def summarize_segments(message: Iterable[Any]) -> str:
         elif segment_type == "image":
             label = _first_value(data, ("file", "url", "summary"))
             parts.append(f"[image: {label}]" if label else "[image]")
+        elif segment_type == "video":
+            label = _first_value(data, ("file", "url", "summary"))
+            parts.append(f"[video: {label}]" if label else "[video]")
         elif segment_type == "record":
             label = _first_value(data, ("file", "url", "summary"))
             parts.append(f"[voice: {label}]" if label else "[voice]")
@@ -44,6 +78,28 @@ def summarize_segments(message: Iterable[Any]) -> str:
         else:
             parts.append(f"[unsupported segment: {segment_type}]")
     return " ".join(part.strip() for part in parts if part.strip())
+
+
+def extract_image_urls(message: Iterable[Any]) -> list[str]:
+    return extract_media_urls(message).image_urls
+
+
+def extract_media_urls(message: Iterable[Any]) -> MediaUrls:
+    image_urls: list[str] = []
+    video_urls: list[str] = []
+    for segment in message:
+        segment_type = str(getattr(segment, "type", "unknown"))
+        data = _data(segment)
+        label = _first_value(data, ("url", "file"))
+        if not _is_http_url(label):
+            continue
+        if segment_type == "video" or (
+            segment_type == "image" and _is_dynamic_media_url(label)
+        ):
+            video_urls.append(label)
+        elif segment_type == "image":
+            image_urls.append(label)
+    return MediaUrls(image_urls=image_urls, video_urls=video_urls)
 
 
 def is_reply_to(message: Iterable[Any]) -> bool:

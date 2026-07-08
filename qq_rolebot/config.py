@@ -40,6 +40,14 @@ def _int(env: Mapping[str, str], key: str, default: int) -> int:
         raise ConfigError(f"{key} must be an integer") from exc
 
 
+def _float(env: Mapping[str, str], key: str, default: float) -> float:
+    raw = env.get(key, str(default)).strip()
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{key} must be a number") from exc
+
+
 def _bool(env: Mapping[str, str], key: str, default: bool) -> bool:
     raw = env.get(key, str(default)).strip().lower()
     if raw in {"1", "true", "yes", "on"}:
@@ -96,6 +104,17 @@ class Settings:
     tts_prompt_text: str
     tts_prompt_lang: str
     tts_text_lang: str
+    vision_model_enabled: bool
+    vision_model_api_base: str
+    vision_model_api_key: str
+    vision_model_name: str
+    vision_model_timeout_seconds: int
+    vision_model_max_images: int
+    vision_model_enable_thinking: bool
+    vision_model_enable_search: bool
+    vision_model_video_fps: float
+    debug_trace_dir: Path
+    debug_trace_retention_seconds: int
     followup_window_seconds: int
     followup_trigger_keywords: list[str]
 
@@ -136,6 +155,22 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     tts_timeout_seconds = _int(env, "TTS_TIMEOUT_SECONDS", 20)
     if tts_timeout_seconds < 1:
         raise ConfigError("TTS_TIMEOUT_SECONDS must be greater than 0")
+
+    vision_model_timeout_seconds = _int(env, "VISION_MODEL_TIMEOUT_SECONDS", 60)
+    if vision_model_timeout_seconds < 1:
+        raise ConfigError("VISION_MODEL_TIMEOUT_SECONDS must be greater than 0")
+
+    vision_model_max_images = _int(env, "VISION_MODEL_MAX_IMAGES", 2)
+    if vision_model_max_images < 1:
+        raise ConfigError("VISION_MODEL_MAX_IMAGES must be greater than 0")
+
+    vision_model_video_fps = _float(env, "VISION_MODEL_VIDEO_FPS", 2.0)
+    if vision_model_video_fps <= 0 or vision_model_video_fps > 10:
+        raise ConfigError("VISION_MODEL_VIDEO_FPS must be greater than 0 and at most 10")
+
+    debug_trace_retention_seconds = _int(env, "DEBUG_TRACE_RETENTION_SECONDS", 86_400)
+    if debug_trace_retention_seconds < 1:
+        raise ConfigError("DEBUG_TRACE_RETENTION_SECONDS must be greater than 0")
 
     tts_max_chars = _int(env, "TTS_MAX_CHARS", 80)
     if tts_max_chars < 1:
@@ -220,6 +255,18 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_prompt_text=env.get("TTS_PROMPT_TEXT", "").strip(),
         tts_prompt_lang=env.get("TTS_PROMPT_LANG", "zh").strip() or "zh",
         tts_text_lang=env.get("TTS_TEXT_LANG", "zh").strip() or "zh",
+        vision_model_enabled=_bool(env, "VISION_MODEL_ENABLED", False),
+        vision_model_api_base=env.get("VISION_MODEL_API_BASE", "").strip().rstrip("/"),
+        vision_model_api_key=env.get("VISION_MODEL_API_KEY", "").strip(),
+        vision_model_name=env.get("VISION_MODEL_NAME", "qwen3.6-plus").strip()
+        or "qwen3.6-plus",
+        vision_model_timeout_seconds=vision_model_timeout_seconds,
+        vision_model_max_images=vision_model_max_images,
+        vision_model_enable_thinking=_bool(env, "VISION_MODEL_ENABLE_THINKING", True),
+        vision_model_enable_search=_bool(env, "VISION_MODEL_ENABLE_SEARCH", True),
+        vision_model_video_fps=vision_model_video_fps,
+        debug_trace_dir=Path(env.get("DEBUG_TRACE_DIR", "data/debug_traces")),
+        debug_trace_retention_seconds=debug_trace_retention_seconds,
         followup_window_seconds=followup_window_seconds,
         followup_trigger_keywords=parse_str_list(
             env.get(

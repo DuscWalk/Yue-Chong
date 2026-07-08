@@ -140,6 +140,17 @@ def test_load_settings_reads_tts_defaults() -> None:
     assert settings.tts_dialect_hint == "neutral"
     assert settings.followup_window_seconds == 90
     assert "你" in settings.followup_trigger_keywords
+    assert settings.vision_model_enabled is False
+    assert settings.vision_model_api_base == ""
+    assert settings.vision_model_api_key == ""
+    assert settings.vision_model_name == "qwen3.6-plus"
+    assert settings.vision_model_timeout_seconds == 60
+    assert settings.vision_model_max_images == 2
+    assert settings.vision_model_enable_thinking is True
+    assert settings.vision_model_enable_search is True
+    assert settings.vision_model_video_fps == 2.0
+    assert settings.debug_trace_dir.as_posix() == "data/debug_traces"
+    assert settings.debug_trace_retention_seconds == 86_400
 
 
 def test_load_settings_reads_tts_overrides() -> None:
@@ -177,6 +188,50 @@ def test_load_settings_reads_tts_overrides() -> None:
     assert settings.tts_dialect_hint == "southwest"
     assert settings.followup_window_seconds == 45
     assert settings.followup_trigger_keywords == ["你呢", "怎么看"]
+
+
+def test_load_settings_reads_vision_model_overrides() -> None:
+    env = complete_env()
+    env.update(
+        {
+            "VISION_MODEL_ENABLED": "true",
+            "VISION_MODEL_API_BASE": "https://vision.example.test/v1",
+            "VISION_MODEL_API_KEY": "vision-key",
+            "VISION_MODEL_NAME": "qwen3.6-plus",
+            "VISION_MODEL_TIMEOUT_SECONDS": "9",
+            "VISION_MODEL_MAX_IMAGES": "3",
+            "VISION_MODEL_ENABLE_THINKING": "false",
+            "VISION_MODEL_ENABLE_SEARCH": "false",
+            "VISION_MODEL_VIDEO_FPS": "4.5",
+        }
+    )
+
+    settings = load_settings(env)
+
+    assert settings.vision_model_enabled is True
+    assert settings.vision_model_api_base == "https://vision.example.test/v1"
+    assert settings.vision_model_api_key == "vision-key"
+    assert settings.vision_model_name == "qwen3.6-plus"
+    assert settings.vision_model_timeout_seconds == 9
+    assert settings.vision_model_max_images == 3
+    assert settings.vision_model_enable_thinking is False
+    assert settings.vision_model_enable_search is False
+    assert settings.vision_model_video_fps == 4.5
+
+
+def test_load_settings_reads_debug_trace_overrides() -> None:
+    env = complete_env()
+    env.update(
+        {
+            "DEBUG_TRACE_DIR": "data/test_debug_traces",
+            "DEBUG_TRACE_RETENTION_SECONDS": "60",
+        }
+    )
+
+    settings = load_settings(env)
+
+    assert settings.debug_trace_dir.as_posix() == "data/test_debug_traces"
+    assert settings.debug_trace_retention_seconds == 60
 
 
 def test_load_settings_rejects_missing_required_value() -> None:
@@ -247,4 +302,38 @@ def test_load_settings_rejects_invalid_repeat_reply_threshold() -> None:
     env["REPEAT_REPLY_THRESHOLD"] = "1"
 
     with pytest.raises(ConfigError, match="REPEAT_REPLY_THRESHOLD"):
+        load_settings(env)
+
+
+def test_load_settings_rejects_invalid_vision_model_limits() -> None:
+    env = complete_env()
+    env["VISION_MODEL_TIMEOUT_SECONDS"] = "0"
+
+    with pytest.raises(ConfigError, match="VISION_MODEL_TIMEOUT_SECONDS"):
+        load_settings(env)
+
+    env = complete_env()
+    env["VISION_MODEL_MAX_IMAGES"] = "0"
+
+    with pytest.raises(ConfigError, match="VISION_MODEL_MAX_IMAGES"):
+        load_settings(env)
+
+    env = complete_env()
+    env["VISION_MODEL_VIDEO_FPS"] = "0"
+
+    with pytest.raises(ConfigError, match="VISION_MODEL_VIDEO_FPS"):
+        load_settings(env)
+
+    env = complete_env()
+    env["VISION_MODEL_VIDEO_FPS"] = "11"
+
+    with pytest.raises(ConfigError, match="VISION_MODEL_VIDEO_FPS"):
+        load_settings(env)
+
+
+def test_load_settings_rejects_invalid_debug_trace_retention() -> None:
+    env = complete_env()
+    env["DEBUG_TRACE_RETENTION_SECONDS"] = "0"
+
+    with pytest.raises(ConfigError, match="DEBUG_TRACE_RETENTION_SECONDS"):
         load_settings(env)

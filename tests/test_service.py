@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from qq_rolebot.config import load_settings
+from qq_rolebot.debug_trace import DebugTraceLogger
 from qq_rolebot.model_client import ModelResult
 from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter
 from qq_rolebot.service import ChatService
@@ -50,6 +51,42 @@ class FakeToolRunner:
         return Result(self.direct_reply, self.context)
 
 
+class FakeVisionClient:
+    def __init__(
+        self,
+        *,
+        summary: str = "图片里是一张猫猫表情包。",
+        ok: bool = True,
+        error: str | None = None,
+    ) -> None:
+        self.summary = summary
+        self.ok = ok
+        self.error = error
+        self.calls = 0
+        self.image_urls: list[str] = []
+        self.video_urls: list[str] = []
+
+    async def describe(
+        self,
+        image_urls: list[str],
+        video_urls: list[str] | None = None,
+        trace=None,
+    ):
+        self.calls += 1
+        self.image_urls = image_urls
+        self.video_urls = video_urls or []
+        if trace is not None:
+            trace.event("vision.fake", {"summary": self.summary})
+
+        class Result:
+            def __init__(self, *, ok: bool, summary: str, error: str | None) -> None:
+                self.ok = ok
+                self.summary = summary
+                self.error = error
+
+        return Result(ok=self.ok, summary=self.summary, error=self.error)
+
+
 def env(tmp_path: Path) -> dict[str, str]:
     return {
         "BOT_HOST": "127.0.0.1",
@@ -78,6 +115,8 @@ def msg(
     sender: int = 11,
     group: int = 20,
     created_at: int = 100,
+    image_urls: list[str] | None = None,
+    video_urls: list[str] | None = None,
 ) -> IncomingMessage:
     return IncomingMessage(
         group_id=group,
@@ -86,10 +125,18 @@ def msg(
         text=text,
         is_at_bot=at_bot,
         created_at=created_at,
+        image_urls=image_urls or [],
+        video_urls=video_urls or [],
     )
 
 
-def private_msg(text: str, *, sender: int = 99) -> IncomingMessage:
+def private_msg(
+    text: str,
+    *,
+    sender: int = 99,
+    image_urls: list[str] | None = None,
+    video_urls: list[str] | None = None,
+) -> IncomingMessage:
     return IncomingMessage(
         group_id=0,
         user_id=sender,
@@ -98,7 +145,15 @@ def private_msg(text: str, *, sender: int = 99) -> IncomingMessage:
         is_at_bot=False,
         is_private=True,
         created_at=100,
+        image_urls=image_urls or [],
+        video_urls=video_urls or [],
     )
+
+
+def trace_text(path: Path) -> str:
+    files = list(path.glob("*.jsonl"))
+    assert len(files) == 1
+    return files[0].read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -237,6 +292,44 @@ async def test_service_follows_repeated_group_message_without_model(tmp_path: Pa
     assert second == "好耶"
     assert model.calls == 0
     assert tools.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_service_repeat_reply_cools_down_same_message(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    model = CountingModel()
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+    )
+
+    first = await service.handle(
+        msg("好耶", at_bot=False, sender=11, created_at=100),
+        random_value=99,
+    )
+    second = await service.handle(
+        msg("好耶", at_bot=False, sender=12, created_at=101),
+        random_value=99,
+    )
+    blocked = await service.handle(
+        msg("好耶", at_bot=False, sender=13, created_at=200),
+        random_value=99,
+    )
+    after_cooldown = await service.handle(
+        msg("好耶", at_bot=False, sender=14, created_at=701),
+        random_value=99,
+    )
+
+    assert first is None
+    assert second == "好耶"
+    assert blocked is None
+    assert after_cooldown == "好耶"
+    assert model.calls == 0
 
 
 @pytest.mark.asyncio
@@ -417,6 +510,166 @@ async def test_service_passes_tool_context_to_model(tmp_path: Path) -> None:
 
     assert reply == "model reply"
     assert "Search query: today news" in model.messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_service_passes_vision_context_to_model_after_trigger(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    model = CapturingModel()
+    vision = FakeVisionClient(summary="图片里是一张猫猫表情包，看起来很累。")
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+        vision_client=vision,
+    )
+
+    reply = await service.handle(
+        msg(
+            "[image: https://example.test/cat.jpg]",
+            at_bot=True,
+            image_urls=["https://example.test/cat.jpg"],
+        ),
+        random_value=99,
+    )
+
+    assert reply == "model reply"
+    assert vision.calls == 1
+    assert vision.image_urls == ["https://example.test/cat.jpg"]
+    assert "Vision Context:" in model.messages[0]["content"]
+    assert "图片里是一张猫猫表情包，看起来很累。" in model.messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_service_warns_model_not_to_guess_when_vision_fails(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    model = CapturingModel()
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+        vision_client=FakeVisionClient(ok=False, error="timeout"),
+    )
+
+    reply = await service.handle(
+        private_msg(
+            "[image: https://example.test/private-image.png]这是哪个",
+            image_urls=["https://example.test/private-image.png"],
+        ),
+        random_value=99,
+    )
+
+    assert reply == "model reply"
+    system_prompt = model.messages[0]["content"]
+    assert "Vision Context:" in system_prompt
+    assert "视觉识别失败" in system_prompt
+    assert "不要猜测图片内容" in system_prompt
+    assert "timeout" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_service_traces_private_prompt_model_response_and_reply(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    model = CapturingModel()
+    trace_logger = DebugTraceLogger(root_dir=tmp_path / "traces", now=lambda: 200_000)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+        vision_client=FakeVisionClient(summary="视觉识别：图里是令。"),
+        trace_logger=trace_logger,
+    )
+
+    reply = await service.handle(
+        private_msg(
+            "[image: https://example.test/private-image.png]这是哪个",
+            image_urls=["https://example.test/private-image.png"],
+        ),
+        random_value=99,
+    )
+
+    assert reply == "model reply"
+    raw = trace_text(tmp_path / "traces")
+    assert "message.received" in raw
+    assert "Private Amy" in raw
+    assert "vision.fake" in raw
+    assert "视觉识别：图里是令。" in raw
+    assert "vision.context" in raw
+    assert "model.prompt" in raw
+    assert "Vision Context:" in raw
+    assert "model.response" in raw
+    assert "model reply" in raw
+    assert "reply.final" in raw
+
+
+@pytest.mark.asyncio
+async def test_service_passes_video_urls_to_vision_client_after_trigger(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    model = CapturingModel()
+    vision = FakeVisionClient(summary="动图里有人挥手。")
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+        vision_client=vision,
+    )
+
+    reply = await service.handle(
+        msg(
+            "[video: https://example.test/wave.gif]",
+            at_bot=True,
+            video_urls=["https://example.test/wave.gif"],
+        ),
+        random_value=99,
+    )
+
+    assert reply == "model reply"
+    assert vision.calls == 1
+    assert vision.image_urls == []
+    assert vision.video_urls == ["https://example.test/wave.gif"]
+    assert "动图里有人挥手。" in model.messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_service_skips_vision_when_message_does_not_trigger(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    vision = FakeVisionClient()
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=CapturingModel(),
+        rate_limiter=RateLimiter(),
+        vision_client=vision,
+    )
+
+    reply = await service.handle(
+        msg(
+            "[image: https://example.test/cat.jpg]",
+            at_bot=False,
+            image_urls=["https://example.test/cat.jpg"],
+        ),
+        random_value=99,
+    )
+
+    assert reply is None
+    assert vision.calls == 0
 
 
 @pytest.mark.asyncio

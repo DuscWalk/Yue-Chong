@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -23,6 +23,8 @@ class IncomingMessage:
     created_at: int
     is_private: bool = False
     is_reply_to_bot: bool = False
+    image_urls: list[str] = field(default_factory=list)
+    video_urls: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
