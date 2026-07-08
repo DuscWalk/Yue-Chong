@@ -11,9 +11,16 @@ from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter, dec
 from qq_rolebot.prompting import build_chat_messages
 from qq_rolebot.storage import MessageRecord, Storage
 
+REPEAT_REPLY_COOLDOWN_SECONDS = 600
+
 
 class ChatModel(Protocol):
     async def chat(self, messages: list[dict[str, str]]) -> ModelResult:
+        ...
+
+
+class VisionClientProtocol(Protocol):
+    async def describe(self, image_urls: list[str], video_urls: list[str] | None = None):
         ...
 
 
@@ -32,6 +39,7 @@ class ChatService:
         rate_limiter: RateLimiter,
         tool_runner: ToolRunnerProtocol | None = None,
         followup_tracker: FollowupTracker | None = None,
+        vision_client: VisionClientProtocol | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
@@ -39,6 +47,8 @@ class ChatService:
         self.rate_limiter = rate_limiter
         self.tool_runner = tool_runner
         self.followup_tracker = followup_tracker
+        self.vision_client = vision_client
+        self._repeat_reply_cooldowns: dict[tuple[int, str], int] = {}
         self.persona = load_persona(settings.persona_path)
 
     def _switch_persona(self, variant: str) -> str:
@@ -125,6 +135,7 @@ class ChatService:
                 return reply
             tool_context = str(getattr(tool_result, "context", "") or "")
 
+        tool_context = self._join_context(tool_context, await self._vision_context(message))
         context = await self.storage.recent_messages(message.group_id)
         result = await self.model.chat(
             build_chat_messages(self.persona, context, message, tool_context=tool_context)
@@ -141,6 +152,24 @@ class ChatService:
             return None
 
         return reply
+
+    async def _vision_context(self, message: IncomingMessage) -> str:
+        if self.vision_client is None or not (message.image_urls or message.video_urls):
+            return ""
+        result = await self.vision_client.describe(
+            message.image_urls,
+            video_urls=message.video_urls,
+        )
+        if not getattr(result, "ok", False):
+            return ""
+        summary = str(getattr(result, "summary", "") or "").strip()
+        if not summary:
+            return ""
+        return f"Vision Context:\n{summary}"
+
+    @staticmethod
+    def _join_context(*items: str) -> str:
+        return "\n\n".join(item for item in items if item)
 
     async def _repeat_reply(self, message: IncomingMessage, *, muted_until: int) -> str | None:
         if not self.settings.repeat_reply_enabled:
@@ -164,11 +193,24 @@ class ChatService:
         if len({item.user_id for item in tail}) < 2:
             return None
 
-        return clean_response(
+        cooldown_key = (message.group_id, text)
+        last_reply_at = self._repeat_reply_cooldowns.get(cooldown_key)
+        if (
+            last_reply_at is not None
+            and message.created_at - last_reply_at < REPEAT_REPLY_COOLDOWN_SECONDS
+        ):
+            return None
+
+        reply = clean_response(
             text,
             max_chars=self.settings.max_output_chars,
             sensitive_words=self.settings.sensitive_words,
         )
+        if reply is None:
+            return None
+
+        self._repeat_reply_cooldowns[cooldown_key] = message.created_at
+        return reply
 
     async def _handle_private(self, message: IncomingMessage) -> str | None:
         context_id = -abs(message.user_id)
@@ -194,6 +236,7 @@ class ChatService:
                 return reply
             tool_context = str(getattr(tool_result, "context", "") or "")
 
+        tool_context = self._join_context(tool_context, await self._vision_context(message))
         context = await self.storage.recent_messages(context_id)
         result = await self.model.chat(
             build_chat_messages(self.persona, context, message, tool_context=tool_context)

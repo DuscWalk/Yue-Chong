@@ -100,7 +100,7 @@ FOLLOWUP_TRIGGER_KEYWORDS=你,你觉得,你看,怎么看,咋看,怎么样,如何
 ```
 
 Existing groups keep their stored probability in SQLite. Use `/bot prob N` in a group to change that group without editing `.env`.
-When `REPEAT_REPLY_ENABLED=true`, the bot can join a repeated-message chain after `REPEAT_REPLY_THRESHOLD` consecutive identical unaddressed group messages from at least two users.
+When `REPEAT_REPLY_ENABLED=true`, the bot can join a repeated-message chain after `REPEAT_REPLY_THRESHOLD` consecutive identical unaddressed group messages from at least two users. After it joins, the same text in the same group is cooled down for 10 minutes.
 
 Tools:
 
@@ -116,6 +116,22 @@ TOOLS_ENABLE_TIME=true
 ```
 
 Set `SEARCH_COOLDOWN_SECONDS=0` to remove search cooldown.
+
+Vision:
+
+```dotenv
+VISION_MODEL_ENABLED=false
+VISION_MODEL_API_BASE=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+VISION_MODEL_API_KEY=
+VISION_MODEL_NAME=qwen3.6-plus
+VISION_MODEL_TIMEOUT_SECONDS=15
+VISION_MODEL_MAX_IMAGES=2
+VISION_MODEL_ENABLE_THINKING=true
+VISION_MODEL_ENABLE_SEARCH=true
+VISION_MODEL_VIDEO_FPS=2
+```
+
+When enabled, visual understanding runs only after the bot has decided to reply. It summarizes current HTTP image, GIF, and video URLs for the main chat model. Optional image/web search can add source or meme context; it does not replace the main roleplay model.
 
 Voice:
 
@@ -333,7 +349,24 @@ journalctl -u qq-rolebot -n 80 --no-pager
 
 Search only runs when the message is private, `@` the bot, or replies to the bot, and contains search/current-information intent.
 
-## 9. Optional TTS Backends
+## 9. Optional Vision Model
+
+Use an OpenAI-compatible vision model when the bot should understand images or meme-style image messages before the main model replies:
+
+```dotenv
+VISION_MODEL_ENABLED=true
+VISION_MODEL_API_BASE=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+VISION_MODEL_API_KEY=
+VISION_MODEL_NAME=qwen3.6-plus
+VISION_MODEL_MAX_IMAGES=2
+VISION_MODEL_ENABLE_THINKING=true
+VISION_MODEL_ENABLE_SEARCH=true
+VISION_MODEL_VIDEO_FPS=2
+```
+
+Keep the real API key only in `/opt/qq-rolebot/.env`. The bot sends only the current message's HTTP image, GIF, or video URLs after reply triggering. Static images use `image_url`; OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` use `video_url`. With `VISION_MODEL_ENABLE_SEARCH=true`, image/web search may add a short source or meme-context summary. The final reply still comes from the main chat model.
+
+## 10. Optional TTS Backends
 
 ### Generic HTTP TTS
 
@@ -387,7 +420,7 @@ TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
 
 `TTS_SPEAKER` is the Alibaba voice id, not a local path. The client downloads generated audio from the temporary URL returned by DashScope and caches it under `TTS_CACHE_DIR`.
 
-## 10. NapCat Account Watchdog
+## 11. NapCat Account Watchdog
 
 The watchdog is a separate one-shot script run by systemd timer. It checks the bot service, NapCat
 service, bot TCP port, OneBot reverse WebSocket connection, and recent NapCat logs. When the account
@@ -540,7 +573,7 @@ sudo journalctl -u napcat-qr-click -n 80 --no-pager -l
 The QR attachment is sensitive login material. Do not copy it into git, paste it into public logs,
 or forward it outside the administrator mailbox.
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 ### NapCat reverse WebSocket gets ECONNREFUSED
 

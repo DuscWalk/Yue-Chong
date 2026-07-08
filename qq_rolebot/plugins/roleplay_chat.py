@@ -7,7 +7,7 @@ from nonebot import get_driver, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
 
 from qq_rolebot.config import load_settings
-from qq_rolebot.message_segments import is_reply_to, summarize_segments
+from qq_rolebot.message_segments import extract_media_urls, is_reply_to, summarize_segments
 from qq_rolebot.model_client import ModelClient
 from qq_rolebot.persona import load_persona
 from qq_rolebot.persona_sources import PersonaSourceClient
@@ -19,6 +19,7 @@ from qq_rolebot.time_tool import TimeTool
 from qq_rolebot.tool_router import ToolRouter
 from qq_rolebot.tool_runner import ToolRunner
 from qq_rolebot.tts_client import TTSClient
+from qq_rolebot.vision_client import VisionClient
 from qq_rolebot.voice_policy import VoicePolicy
 from qq_rolebot.voice_service import VoiceService
 
@@ -60,6 +61,23 @@ tool_runner = ToolRunner(
     enable_search=settings.tools_enable_search and search_client is not None,
     enable_persona_sources=settings.tools_enable_persona_sources,
 )
+vision_client = None
+if (
+    settings.vision_model_enabled
+    and settings.vision_model_api_base
+    and settings.vision_model_api_key
+    and settings.vision_model_name
+):
+    vision_client = VisionClient(
+        api_base=settings.vision_model_api_base,
+        api_key=settings.vision_model_api_key,
+        model_name=settings.vision_model_name,
+        timeout_seconds=settings.vision_model_timeout_seconds,
+        max_images=settings.vision_model_max_images,
+        enable_thinking=settings.vision_model_enable_thinking,
+        enable_search=settings.vision_model_enable_search,
+        video_fps=settings.vision_model_video_fps,
+    )
 service = ChatService(
     settings=settings,
     storage=storage,
@@ -70,6 +88,7 @@ service = ChatService(
         window_seconds=settings.followup_window_seconds,
         trigger_keywords=settings.followup_trigger_keywords,
     ),
+    vision_client=vision_client,
 )
 voice_service = None
 if settings.tts_enabled and settings.tts_api_url:
@@ -145,6 +164,8 @@ def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage 
     if not text:
         return None
 
+    message_segments = getattr(event, "message", [])
+    media_urls = extract_media_urls(message_segments)
     sender = event.sender
     nickname = getattr(sender, "card", "") or getattr(sender, "nickname", "") or str(event.user_id)
     message_type = getattr(event, "message_type", "")
@@ -158,6 +179,8 @@ def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage 
             is_private=True,
             is_reply_to_bot=False,
             created_at=int(getattr(event, "time", int(time.time()))),
+            image_urls=media_urls.image_urls,
+            video_urls=media_urls.video_urls,
         )
 
     if message_type == "group":
@@ -169,6 +192,8 @@ def build_incoming_message(event: MessageEvent, bot_id: int) -> IncomingMessage 
             is_at_bot=is_at_bot(event, bot_id),
             is_reply_to_bot=is_reply_to_bot(event, bot_id),
             created_at=int(getattr(event, "time", int(time.time()))),
+            image_urls=media_urls.image_urls,
+            video_urls=media_urls.video_urls,
         )
 
     return None

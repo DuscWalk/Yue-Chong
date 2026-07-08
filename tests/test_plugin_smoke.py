@@ -101,6 +101,61 @@ def test_plugin_uses_nonebot_to_me_after_at_segment_removed(monkeypatch) -> None
     assert incoming.is_at_bot is True
 
 
+def test_plugin_extracts_image_urls_into_incoming_message(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    event = SimpleNamespace(
+        message_type="group",
+        group_id=20,
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy", card=""),
+        time=123,
+        to_me=True,
+        message=[
+            SimpleNamespace(type="text", data={"text": "看看这个"}),
+            SimpleNamespace(type="image", data={"url": "https://example.test/meme.jpg"}),
+        ],
+        get_plaintext=lambda: "看看这个",
+    )
+
+    incoming = module.build_incoming_message(event, bot_id=10001)
+
+    assert incoming.text == "看看这个 [image: https://example.test/meme.jpg]"
+    assert incoming.image_urls == ["https://example.test/meme.jpg"]
+    assert incoming.video_urls == []
+
+
+def test_plugin_extracts_dynamic_media_into_incoming_message(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    event = SimpleNamespace(
+        message_type="group",
+        group_id=20,
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy", card=""),
+        time=123,
+        to_me=True,
+        message=[
+            SimpleNamespace(type="text", data={"text": "看看这个"}),
+            SimpleNamespace(type="image", data={"url": "https://example.test/meme.gif"}),
+            SimpleNamespace(type="video", data={"url": "https://example.test/clip.mp4"}),
+        ],
+        get_plaintext=lambda: "看看这个",
+    )
+
+    incoming = module.build_incoming_message(event, bot_id=10001)
+
+    assert incoming.text == (
+        "看看这个 [image: https://example.test/meme.gif] "
+        "[video: https://example.test/clip.mp4]"
+    )
+    assert incoming.image_urls == []
+    assert incoming.video_urls == [
+        "https://example.test/meme.gif",
+        "https://example.test/clip.mp4",
+    ]
+
+
 def test_plugin_does_not_mark_reply_to_other_user_as_reply_to_bot(monkeypatch) -> None:
     set_env(monkeypatch)
     module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
