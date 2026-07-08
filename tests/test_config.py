@@ -148,6 +148,7 @@ def test_load_settings_reads_tts_defaults() -> None:
     assert settings.vision_model_api_key == ""
     assert settings.vision_model_name == "qwen3.6-plus"
     assert settings.vision_model_mode == "hybrid"
+    assert settings.vision_model_search_input == "data_url"
     assert settings.vision_model_timeout_seconds == 60
     assert settings.vision_model_search_timeout_seconds == 90
     assert settings.vision_model_max_images == 2
@@ -204,6 +205,7 @@ def test_load_settings_reads_vision_model_overrides() -> None:
             "VISION_MODEL_API_KEY": "vision-key",
             "VISION_MODEL_NAME": "qwen3.6-plus",
             "VISION_MODEL_MODE": "search_only",
+            "VISION_MODEL_SEARCH_INPUT": "original_url",
             "VISION_MODEL_TIMEOUT_SECONDS": "9",
             "VISION_MODEL_SEARCH_TIMEOUT_SECONDS": "91",
             "VISION_MODEL_MAX_IMAGES": "3",
@@ -220,6 +222,7 @@ def test_load_settings_reads_vision_model_overrides() -> None:
     assert settings.vision_model_api_key == "vision-key"
     assert settings.vision_model_name == "qwen3.6-plus"
     assert settings.vision_model_mode == "search_only"
+    assert settings.vision_model_search_input == "original_url"
     assert settings.vision_model_timeout_seconds == 9
     assert settings.vision_model_search_timeout_seconds == 91
     assert settings.vision_model_max_images == 3
@@ -233,6 +236,14 @@ def test_load_settings_rejects_invalid_vision_model_mode() -> None:
     env["VISION_MODEL_MODE"] = "fast"
 
     with pytest.raises(ConfigError, match="VISION_MODEL_MODE"):
+        load_settings(env)
+
+
+def test_load_settings_rejects_invalid_vision_model_search_input() -> None:
+    env = complete_env()
+    env["VISION_MODEL_SEARCH_INPUT"] = "cdn"
+
+    with pytest.raises(ConfigError, match="VISION_MODEL_SEARCH_INPUT"):
         load_settings(env)
 
 

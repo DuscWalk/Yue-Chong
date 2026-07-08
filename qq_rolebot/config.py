@@ -110,6 +110,7 @@ class Settings:
     vision_model_api_key: str
     vision_model_name: str
     vision_model_mode: str
+    vision_model_search_input: str
     vision_model_timeout_seconds: int
     vision_model_search_timeout_seconds: int
     vision_model_max_images: int
@@ -207,6 +208,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if vision_model_mode not in {"hybrid", "search_only", "media_only"}:
         raise ConfigError("VISION_MODEL_MODE must be one of: hybrid, search_only, media_only")
 
+    vision_model_search_input = (
+        env.get("VISION_MODEL_SEARCH_INPUT", "data_url").strip().lower() or "data_url"
+    )
+    if vision_model_search_input not in {"data_url", "original_url"}:
+        raise ConfigError("VISION_MODEL_SEARCH_INPUT must be one of: data_url, original_url")
+
     raw_tts_ref_audio_path = env.get("TTS_REF_AUDIO_PATH", "").strip()
     persona_variant = env.get("PERSONA_VARIANT", "dialect").strip().lower() or "dialect"
     if persona_variant not in {"dialect", "standard", "custom"}:
@@ -277,6 +284,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         vision_model_name=env.get("VISION_MODEL_NAME", "qwen3.6-plus").strip()
         or "qwen3.6-plus",
         vision_model_mode=vision_model_mode,
+        vision_model_search_input=vision_model_search_input,
         vision_model_timeout_seconds=vision_model_timeout_seconds,
         vision_model_search_timeout_seconds=vision_model_search_timeout_seconds,
         vision_model_max_images=vision_model_max_images,

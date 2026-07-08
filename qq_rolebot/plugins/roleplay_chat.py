@@ -85,6 +85,7 @@ if (
         timeout_seconds=settings.vision_model_timeout_seconds,
         max_images=settings.vision_model_max_images,
         mode=settings.vision_model_mode,
+        search_input=settings.vision_model_search_input,
         enable_thinking=settings.vision_model_enable_thinking,
         enable_search=settings.vision_model_enable_search,
         video_fps=settings.vision_model_video_fps,

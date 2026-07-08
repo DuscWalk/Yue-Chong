@@ -29,6 +29,7 @@ class VisionClient:
         timeout_seconds: int,
         max_images: int,
         mode: str = "hybrid",
+        search_input: str = "data_url",
         enable_thinking: bool = True,
         enable_search: bool = True,
         video_fps: float = 2.0,
@@ -41,6 +42,7 @@ class VisionClient:
         self.timeout_seconds = timeout_seconds
         self.max_images = max_images
         self.mode = mode
+        self.search_input = search_input
         self.enable_thinking = enable_thinking
         self.enable_search = enable_search
         self.video_fps = video_fps
@@ -63,6 +65,7 @@ class VisionClient:
                 "video_urls": videos,
                 "max_images": self.max_images,
                 "mode": self.mode,
+                "search_input": self.search_input,
                 "enable_thinking": self.enable_thinking,
                 "enable_search": self.enable_search,
                 "video_fps": self.video_fps,
@@ -72,7 +75,11 @@ class VisionClient:
             self._trace(trace, "vision.describe.result", {"ok": False, "error": "no media urls"})
             return VisionResult(ok=False, error="no media urls")
 
-        prepared_images = await self._image_input_urls(images, trace=trace)
+        needs_prepared_images = self.mode != "search_only" or self.search_input == "data_url"
+        prepared_images = (
+            await self._image_input_urls(images, trace=trace) if needs_prepared_images else []
+        )
+        search_images = prepared_images if self.search_input == "data_url" else images
         errors: list[str] = []
         media_summary = ""
         search_summary = ""
@@ -88,7 +95,7 @@ class VisionClient:
 
         if self.mode != "media_only":
             search = await self._search_images_with_timeout(
-                prepared_images,
+                search_images,
                 videos,
                 trace=trace,
                 timeout_seconds=self.search_timeout_seconds,
