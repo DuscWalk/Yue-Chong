@@ -39,7 +39,7 @@ async def test_vision_client_sends_image_urls_and_returns_summary() -> None:
     result = await client.describe(["https://example.test/a.jpg", "https://example.test/b.jpg"])
 
     assert result.ok is True
-    assert result.summary == "一张猫猫表情包，看起来很累。"
+    assert result.summary == "纯视觉描述：一张猫猫表情包，看起来很累。"
     assert captured["path"] == "/v1/chat/completions"
     assert captured["auth"] == "Bearer vision-secret"
     payload = captured["payload"].decode("utf-8")
@@ -91,6 +91,12 @@ async def test_vision_client_sends_video_and_search_context() -> None:
     captured: dict[str, bytes] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "qq-image.example.test":
+            return httpx.Response(
+                200,
+                content=b"\xff\xd8\xff\xe0fake-jpeg",
+                headers={"Content-Type": "image/jpeg"},
+            )
         captured[request.url.path] = request.read()
         if request.url.path == "/v1/chat/completions":
             return httpx.Response(
@@ -114,18 +120,22 @@ async def test_vision_client_sends_video_and_search_context() -> None:
     )
 
     result = await client.describe(
-        ["https://example.test/a.jpg", "https://example.test/b.jpg"],
+        ["https://qq-image.example.test/a.jpg", "https://example.test/b.jpg"],
         video_urls=["https://example.test/wave.gif"],
     )
 
     assert result.ok is True
-    assert result.summary == "图里有人举杯，动图里有人挥手。\n图搜显示可能是某个网络梗图。"
+    assert result.summary == (
+        "图搜结果（与纯视觉描述冲突时优先参考）：图搜显示可能是某个网络梗图。\n"
+        "纯视觉描述：图里有人举杯，动图里有人挥手。"
+    )
     chat_payload = captured["/v1/chat/completions"].decode("utf-8")
     assert '"enable_thinking":true' in chat_payload
     assert '"type":"image_url"' in chat_payload
     assert '"type":"video_url"' in chat_payload
     assert '"fps":2.0' in chat_payload
-    assert "https://example.test/a.jpg" in chat_payload
+    assert "data:image/jpeg;base64," in chat_payload
+    assert "https://qq-image.example.test/a.jpg" not in chat_payload
     assert "https://example.test/b.jpg" not in chat_payload
     assert "https://example.test/wave.gif" in chat_payload
 
@@ -134,12 +144,13 @@ async def test_vision_client_sends_video_and_search_context() -> None:
     assert '"type":"image_search"' in search_payload
     assert '"type":"web_search"' in search_payload
     assert '"type":"input_image"' in search_payload
-    assert "https://example.test/a.jpg" in search_payload
+    assert "data:image/jpeg;base64," in search_payload
+    assert "https://qq-image.example.test/a.jpg" not in search_payload
     assert "https://example.test/b.jpg" not in search_payload
 
 
 @pytest.mark.asyncio
-async def test_vision_client_does_not_block_on_slow_search_after_media_summary() -> None:
+async def test_vision_client_uses_configured_search_timeout() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "example.test":
             return httpx.Response(
@@ -164,7 +175,7 @@ async def test_vision_client_does_not_block_on_slow_search_after_media_summary()
         timeout_seconds=5,
         max_images=1,
         enable_search=True,
-        search_after_media_timeout_seconds=0.01,
+        search_timeout_seconds=0.01,
         transport=httpx.MockTransport(handler),
     )
 
@@ -174,7 +185,7 @@ async def test_vision_client_does_not_block_on_slow_search_after_media_summary()
     )
 
     assert result.ok is True
-    assert result.summary == "图里是重岳。"
+    assert result.summary == "纯视觉描述：图里是重岳。"
 
 
 @pytest.mark.asyncio

@@ -82,6 +82,7 @@ Required basics:
 - `VISION_MODEL_ENABLED`: whether to call a separate vision model after the bot has already decided to reply.
 - `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible vision model settings.
 - `VISION_MODEL_TIMEOUT_SECONDS`: timeout for each vision-model or image-fetch call; default is `60`.
+- `VISION_MODEL_SEARCH_TIMEOUT_SECONDS`: timeout for image/web search inside the vision model; default is `90`.
 - `VISION_MODEL_MAX_IMAGES`: maximum image URLs sent to the vision model per message.
 - `VISION_MODEL_ENABLE_THINKING`: whether to enable thinking for the vision model calls.
 - `VISION_MODEL_ENABLE_SEARCH`: whether to let the vision model call image/web search for image context.
@@ -160,9 +161,9 @@ Vision summary:
 
 - Enabled by `VISION_MODEL_ENABLED=true`.
 - Runs only after reply triggering and only for current messages with HTTP media URLs.
-- Downloads static images in memory, sends them to the vision model as `data:` inputs, and does not persist the downloaded image bytes.
+- Downloads static images in memory, sends the same `data:` inputs to both visual summary and image/web search, and does not persist the downloaded image bytes.
 - Sends OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` as `video_url`.
-- When `VISION_MODEL_ENABLE_SEARCH=true`, adds a short image/web search summary for image or GIF context.
+- When `VISION_MODEL_ENABLE_SEARCH=true`, adds a short image/web search summary before the pure visual description; if they conflict, the main model is told to prefer the search result.
 - The vision model does not write the final roleplay reply; DeepSeek/main chat model still produces the answer.
 
 Debug traces:

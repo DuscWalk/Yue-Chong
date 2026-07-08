@@ -110,6 +110,7 @@ class Settings:
     vision_model_api_key: str
     vision_model_name: str
     vision_model_timeout_seconds: int
+    vision_model_search_timeout_seconds: int
     vision_model_max_images: int
     vision_model_enable_thinking: bool
     vision_model_enable_search: bool
@@ -164,6 +165,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     vision_model_timeout_seconds = _int(env, "VISION_MODEL_TIMEOUT_SECONDS", 60)
     if vision_model_timeout_seconds < 1:
         raise ConfigError("VISION_MODEL_TIMEOUT_SECONDS must be greater than 0")
+
+    vision_model_search_timeout_seconds = _int(env, "VISION_MODEL_SEARCH_TIMEOUT_SECONDS", 90)
+    if vision_model_search_timeout_seconds < 1:
+        raise ConfigError("VISION_MODEL_SEARCH_TIMEOUT_SECONDS must be greater than 0")
 
     vision_model_max_images = _int(env, "VISION_MODEL_MAX_IMAGES", 2)
     if vision_model_max_images < 1:
@@ -267,6 +272,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         vision_model_name=env.get("VISION_MODEL_NAME", "qwen3.6-plus").strip()
         or "qwen3.6-plus",
         vision_model_timeout_seconds=vision_model_timeout_seconds,
+        vision_model_search_timeout_seconds=vision_model_search_timeout_seconds,
         vision_model_max_images=vision_model_max_images,
         vision_model_enable_thinking=_bool(env, "VISION_MODEL_ENABLE_THINKING", True),
         vision_model_enable_search=_bool(env, "VISION_MODEL_ENABLE_SEARCH", True),

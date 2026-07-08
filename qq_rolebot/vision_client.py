@@ -31,7 +31,7 @@ class VisionClient:
         enable_thinking: bool = True,
         enable_search: bool = True,
         video_fps: float = 2.0,
-        search_after_media_timeout_seconds: float = 12.0,
+        search_timeout_seconds: float = 90.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.api_base = api_base.rstrip("/")
@@ -42,7 +42,7 @@ class VisionClient:
         self.enable_thinking = enable_thinking
         self.enable_search = enable_search
         self.video_fps = video_fps
-        self.search_after_media_timeout_seconds = search_after_media_timeout_seconds
+        self.search_timeout_seconds = search_timeout_seconds
         self.transport = transport
 
     async def describe(
@@ -69,30 +69,33 @@ class VisionClient:
             self._trace(trace, "vision.describe.result", {"ok": False, "error": "no media urls"})
             return VisionResult(ok=False, error="no media urls")
 
-        summaries: list[str] = []
+        prepared_images = await self._image_input_urls(images, trace=trace)
         errors: list[str] = []
+        media_summary = ""
+        search_summary = ""
 
-        media = await self._describe_media(images, videos, trace=trace)
-        has_media_summary = False
+        media = await self._describe_media(prepared_images, videos, trace=trace)
         if media.ok and media.summary:
-            has_media_summary = True
-            summaries.append(media.summary)
+            media_summary = media.summary
         elif media.error:
             errors.append(media.error)
 
         search = await self._search_images_with_timeout(
-            images,
+            prepared_images,
             videos,
             trace=trace,
-            timeout_seconds=(
-                self.search_after_media_timeout_seconds if has_media_summary else None
-            ),
+            timeout_seconds=self.search_timeout_seconds,
         )
         if search.ok and search.summary:
-            summaries.append(search.summary)
+            search_summary = search.summary
         elif search.error:
             errors.append(search.error)
 
+        summaries: list[str] = []
+        if search_summary:
+            summaries.append(f"图搜结果（与纯视觉描述冲突时优先参考）：{search_summary}")
+        if media_summary:
+            summaries.append(f"纯视觉描述：{media_summary}")
         if summaries:
             summary = "\n".join(summaries)
             self._trace(trace, "vision.describe.result", {"ok": True, "summary": summary})
@@ -103,12 +106,11 @@ class VisionClient:
 
     async def _describe_media(
         self,
-        image_urls: list[str],
+        image_inputs: list[str],
         video_urls: list[str],
         *,
         trace: DebugTrace | None,
     ) -> VisionResult:
-        image_inputs = await self._image_input_urls(image_urls, trace=trace)
         content: list[dict[str, Any]] = [
             {
                 "type": "text",
@@ -266,7 +268,11 @@ class VisionClient:
 
         started = time.monotonic()
         try:
-            data = await self._post_json("/responses", payload)
+            data = await self._post_json(
+                "/responses",
+                payload,
+                timeout_seconds=self.search_timeout_seconds,
+            )
         except Exception as exc:
             error = self._exception_text(exc)
             self._trace(
@@ -306,10 +312,16 @@ class VisionClient:
         )
         return VisionResult(ok=True, summary=text)
 
-    async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post_json(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         async with httpx.AsyncClient(
-            timeout=self.timeout_seconds,
+            timeout=timeout_seconds or self.timeout_seconds,
             transport=self.transport,
         ) as client:
             response = await client.post(

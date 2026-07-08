@@ -79,6 +79,7 @@ if (
         enable_thinking=settings.vision_model_enable_thinking,
         enable_search=settings.vision_model_enable_search,
         video_fps=settings.vision_model_video_fps,
+        search_timeout_seconds=settings.vision_model_search_timeout_seconds,
     )
 service = ChatService(
     settings=settings,
