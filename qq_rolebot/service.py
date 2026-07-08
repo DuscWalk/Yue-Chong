@@ -14,6 +14,12 @@ from qq_rolebot.prompting import build_chat_messages
 from qq_rolebot.storage import MessageRecord, Storage
 
 REPEAT_REPLY_COOLDOWN_SECONDS = 600
+VISION_FAILURE_CONTEXT = (
+    "Vision Context:\n"
+    "视觉识别失败：{error}。这条消息包含图片、表情包、动图或视频，"
+    "但当前没有可靠视觉内容；不要猜测图片内容、角色身份、文字或来源。"
+    "如果用户询问图片是谁或是什么，应说明暂时看不清或识别超时。"
+)
 
 
 class ChatModel(Protocol):
@@ -220,12 +226,14 @@ class ChatService:
             trace=trace,
         )
         if not getattr(result, "ok", False):
+            error = str(getattr(result, "error", "") or "unknown vision error")
+            context = VISION_FAILURE_CONTEXT.format(error=error)
             self._trace(
                 trace,
                 "vision.context",
-                {"context": "", "error": str(getattr(result, "error", "") or "")},
+                {"context": context, "error": error},
             )
-            return ""
+            return context
         summary = str(getattr(result, "summary", "") or "").strip()
         if not summary:
             self._trace(trace, "vision.context", {"context": "", "reason": "empty summary"})

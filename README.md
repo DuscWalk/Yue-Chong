@@ -80,6 +80,7 @@ Required basics:
 - `REPEAT_REPLY_THRESHOLD`: how many consecutive matching messages trigger repeat reply. Minimum is `2`; the same text in the same group is then cooled down for 10 minutes.
 - `VISION_MODEL_ENABLED`: whether to call a separate vision model after the bot has already decided to reply.
 - `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible vision model settings.
+- `VISION_MODEL_TIMEOUT_SECONDS`: timeout for each vision-model or image-fetch call; default is `60`.
 - `VISION_MODEL_MAX_IMAGES`: maximum image URLs sent to the vision model per message.
 - `VISION_MODEL_ENABLE_THINKING`: whether to enable thinking for the vision model calls.
 - `VISION_MODEL_ENABLE_SEARCH`: whether to let the vision model call image/web search for image context.
@@ -157,7 +158,8 @@ Vision summary:
 
 - Enabled by `VISION_MODEL_ENABLED=true`.
 - Runs only after reply triggering and only for current messages with HTTP media URLs.
-- Sends static images as `image_url`; sends OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` as `video_url`.
+- Downloads static images in memory, sends them to the vision model as `data:` inputs, and does not persist the downloaded image bytes.
+- Sends OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` as `video_url`.
 - When `VISION_MODEL_ENABLE_SEARCH=true`, adds a short image/web search summary for image or GIF context.
 - The vision model does not write the final roleplay reply; DeepSeek/main chat model still produces the answer.
 
@@ -166,6 +168,7 @@ Debug traces:
 - Always enabled.
 - Written as per-message JSONL files under `DEBUG_TRACE_DIR`.
 - Include incoming message text/media URLs, vision recognition result, image/web search result, final model prompt, model response, and final cleaned reply.
+- Downloaded image `data:` payloads are redacted in traces; fetch events keep only source URL, media type, byte count, and timing.
 - Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned whenever a new trace event is written.
 - API keys and Authorization headers are not written.
 

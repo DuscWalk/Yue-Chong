@@ -144,7 +144,7 @@ def test_load_settings_reads_tts_defaults() -> None:
     assert settings.vision_model_api_base == ""
     assert settings.vision_model_api_key == ""
     assert settings.vision_model_name == "qwen3.6-plus"
-    assert settings.vision_model_timeout_seconds == 15
+    assert settings.vision_model_timeout_seconds == 60
     assert settings.vision_model_max_images == 2
     assert settings.vision_model_enable_thinking is True
     assert settings.vision_model_enable_search is True

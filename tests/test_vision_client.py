@@ -48,6 +48,41 @@ async def test_vision_client_sends_image_urls_and_returns_summary() -> None:
 
 
 @pytest.mark.asyncio
+async def test_vision_client_downloads_images_before_sending_to_model() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "qq-image.example.test":
+            return httpx.Response(
+                200,
+                content=b"\xff\xd8\xff\xe0fake-jpeg",
+                headers={"Content-Type": "image/jpeg"},
+            )
+        captured["payload"] = request.read()
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "图里是重岳。"}}]},
+        )
+
+    client = VisionClient(
+        api_base="https://vision.example.test/v1",
+        api_key="vision-secret",
+        model_name="qwen3.6-flash",
+        timeout_seconds=5,
+        max_images=1,
+        enable_search=False,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.describe(["https://qq-image.example.test/download?file=temporary"])
+
+    assert result.ok is True
+    payload = captured["payload"].decode("utf-8")
+    assert "data:image/jpeg;base64," in payload
+    assert "https://qq-image.example.test/download" not in payload
+
+
+@pytest.mark.asyncio
 async def test_vision_client_sends_video_and_search_context() -> None:
     captured: dict[str, bytes] = {}
 
@@ -141,6 +176,47 @@ async def test_vision_client_writes_full_trace_without_api_key(tmp_path) -> None
     assert "https://example.test/move.gif" in raw
     assert "vision-secret" not in raw
     assert "Authorization" not in raw
+
+
+@pytest.mark.asyncio
+async def test_vision_client_traces_downloaded_images_without_base64_payload(tmp_path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "qq-image.example.test":
+            return httpx.Response(
+                200,
+                content=b"\xff\xd8\xff\xe0fake-jpeg",
+                headers={"Content-Type": "image/jpeg"},
+            )
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "图里是重岳。"}}]},
+        )
+
+    logger = DebugTraceLogger(root_dir=tmp_path, now=lambda: 200_000)
+    trace = logger.start_trace({"text": "这是哪个"})
+    client = VisionClient(
+        api_base="https://vision.example.test/v1",
+        api_key="vision-secret",
+        model_name="qwen3.6-flash",
+        timeout_seconds=5,
+        max_images=1,
+        enable_search=False,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await client.describe(
+        ["https://qq-image.example.test/download?file=temporary"],
+        trace=trace,
+    )
+
+    assert result.ok is True
+    raw = "\n".join(read_trace_events(tmp_path))
+    assert "vision.image.fetch.result" in raw
+    assert "image/jpeg" in raw
+    assert '"bytes": 13' in raw
+    assert "https://qq-image.example.test/download" in raw
+    assert "data:image/jpeg;base64,<redacted" in raw
+    assert "/9j/4GZha2UtanBlZw" not in raw
 
 
 @pytest.mark.asyncio

@@ -156,7 +156,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if tts_timeout_seconds < 1:
         raise ConfigError("TTS_TIMEOUT_SECONDS must be greater than 0")
 
-    vision_model_timeout_seconds = _int(env, "VISION_MODEL_TIMEOUT_SECONDS", 15)
+    vision_model_timeout_seconds = _int(env, "VISION_MODEL_TIMEOUT_SECONDS", 60)
     if vision_model_timeout_seconds < 1:
         raise ConfigError("VISION_MODEL_TIMEOUT_SECONDS must be greater than 0")
 

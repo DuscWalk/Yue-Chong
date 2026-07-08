@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -95,6 +96,7 @@ class VisionClient:
         *,
         trace: DebugTrace | None,
     ) -> VisionResult:
+        image_inputs = await self._image_input_urls(image_urls, trace=trace)
         content: list[dict[str, Any]] = [
             {
                 "type": "text",
@@ -105,7 +107,7 @@ class VisionClient:
                 ),
             }
         ]
-        content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls)
+        content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_inputs)
         content.extend(
             {
                 "type": "video_url",
@@ -130,16 +132,18 @@ class VisionClient:
         try:
             data = await self._post_json("/chat/completions", payload)
         except Exception as exc:
+            error = self._exception_text(exc)
             self._trace(
                 trace,
                 "vision.media.result",
                 {
                     "ok": False,
-                    "error": str(exc),
+                    "error": error,
+                    "error_type": type(exc).__name__,
                     "elapsed_ms": self._elapsed_ms(started),
                 },
             )
-            return VisionResult(ok=False, error=str(exc))
+            return VisionResult(ok=False, error=error)
 
         try:
             summary = data["choices"][0]["message"]["content"]
@@ -220,16 +224,18 @@ class VisionClient:
         try:
             data = await self._post_json("/responses", payload)
         except Exception as exc:
+            error = self._exception_text(exc)
             self._trace(
                 trace,
                 "vision.search.result",
                 {
                     "ok": False,
-                    "error": str(exc),
+                    "error": error,
+                    "error_type": type(exc).__name__,
                     "elapsed_ms": self._elapsed_ms(started),
                 },
             )
-            return VisionResult(ok=False, error=str(exc))
+            return VisionResult(ok=False, error=error)
 
         text = self._response_text(data).strip()
         if not text:
@@ -271,6 +277,82 @@ class VisionClient:
             data = response.json()
         return data if isinstance(data, dict) else {}
 
+    async def _image_input_urls(
+        self,
+        image_urls: list[str],
+        *,
+        trace: DebugTrace | None,
+    ) -> list[str]:
+        prepared: list[str] = []
+        for url in image_urls:
+            prepared.append(await self._image_data_url_or_original(url, trace=trace))
+        return prepared
+
+    async def _image_data_url_or_original(
+        self,
+        url: str,
+        *,
+        trace: DebugTrace | None,
+    ) -> str:
+        started = time.monotonic()
+        try:
+            content, content_type = await self._download_image(url)
+        except Exception as exc:
+            self._trace(
+                trace,
+                "vision.image.fetch.result",
+                {
+                    "ok": False,
+                    "source_url": url,
+                    "error": self._exception_text(exc),
+                    "error_type": type(exc).__name__,
+                    "elapsed_ms": self._elapsed_ms(started),
+                },
+            )
+            return url
+
+        if content_type is None:
+            self._trace(
+                trace,
+                "vision.image.fetch.result",
+                {
+                    "ok": False,
+                    "source_url": url,
+                    "error": "downloaded content is not a supported image",
+                    "bytes": len(content),
+                    "elapsed_ms": self._elapsed_ms(started),
+                },
+            )
+            return url
+
+        data_url = f"data:{content_type};base64,{base64.b64encode(content).decode('ascii')}"
+        self._trace(
+            trace,
+            "vision.image.fetch.result",
+            {
+                "ok": True,
+                "source_url": url,
+                "content_type": content_type,
+                "bytes": len(content),
+                "elapsed_ms": self._elapsed_ms(started),
+            },
+        )
+        return data_url
+
+    async def _download_image(self, url: str) -> tuple[bytes, str | None]:
+        async with httpx.AsyncClient(
+            timeout=self.timeout_seconds,
+            transport=self.transport,
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            content = response.content
+        return content, self._image_content_type(
+            response.headers.get("Content-Type", ""),
+            content,
+        )
+
     @staticmethod
     def _http_urls(urls: list[str]) -> list[str]:
         return [url for url in urls if url.startswith(("http://", "https://"))]
@@ -305,9 +387,42 @@ class VisionClient:
         return "\n".join(parts)
 
     @staticmethod
-    def _trace(trace: DebugTrace | None, name: str, data: dict[str, Any]) -> None:
+    def _image_content_type(header: str, content: bytes) -> str | None:
+        content_type = header.split(";", 1)[0].strip().lower()
+        if content_type.startswith("image/"):
+            return content_type
+        if content.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if content.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if content.startswith((b"GIF87a", b"GIF89a")):
+            return "image/gif"
+        if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+            return "image/webp"
+        return None
+
+    @staticmethod
+    def _exception_text(exc: Exception) -> str:
+        text = str(exc).strip()
+        return text or type(exc).__name__
+
+    @classmethod
+    def _trace(cls, trace: DebugTrace | None, name: str, data: dict[str, Any]) -> None:
         if trace is not None:
-            trace.event(name, data)
+            trace.event(name, cls._redact_data_urls(data))
+
+    @classmethod
+    def _redact_data_urls(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: cls._redact_data_urls(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._redact_data_urls(item) for item in value]
+        if isinstance(value, str) and value.startswith("data:"):
+            header, separator, encoded = value.partition(",")
+            if not separator:
+                return "data:<redacted>"
+            return f"{header},<redacted {len(encoded)} chars>"
+        return value
 
     @staticmethod
     def _elapsed_ms(started: float) -> int:

@@ -124,7 +124,7 @@ VISION_MODEL_ENABLED=false
 VISION_MODEL_API_BASE=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 VISION_MODEL_API_KEY=
 VISION_MODEL_NAME=qwen3.6-plus
-VISION_MODEL_TIMEOUT_SECONDS=15
+VISION_MODEL_TIMEOUT_SECONDS=60
 VISION_MODEL_MAX_IMAGES=2
 VISION_MODEL_ENABLE_THINKING=true
 VISION_MODEL_ENABLE_SEARCH=true
@@ -363,13 +363,14 @@ VISION_MODEL_ENABLED=true
 VISION_MODEL_API_BASE=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 VISION_MODEL_API_KEY=
 VISION_MODEL_NAME=qwen3.6-plus
+VISION_MODEL_TIMEOUT_SECONDS=60
 VISION_MODEL_MAX_IMAGES=2
 VISION_MODEL_ENABLE_THINKING=true
 VISION_MODEL_ENABLE_SEARCH=true
 VISION_MODEL_VIDEO_FPS=2
 ```
 
-Keep the real API key only in `/opt/qq-rolebot/.env`. The bot sends only the current message's HTTP image, GIF, or video URLs after reply triggering. Static images use `image_url`; OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` use `video_url`. With `VISION_MODEL_ENABLE_SEARCH=true`, image/web search may add a short source or meme-context summary. The final reply still comes from the main chat model.
+Keep the real API key only in `/opt/qq-rolebot/.env`. The bot sends only the current message's HTTP media after reply triggering. Static images are downloaded in memory and sent to the vision model as `data:` image inputs; the downloaded bytes are not persisted, and trace logs redact the base64 payload. OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` use `video_url`. With `VISION_MODEL_ENABLE_SEARCH=true`, image/web search may add a short source or meme-context summary. The final reply still comes from the main chat model.
 
 ## 10. Optional TTS Backends
 

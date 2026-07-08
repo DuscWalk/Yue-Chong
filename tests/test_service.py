@@ -52,8 +52,16 @@ class FakeToolRunner:
 
 
 class FakeVisionClient:
-    def __init__(self, *, summary: str = "图片里是一张猫猫表情包。") -> None:
+    def __init__(
+        self,
+        *,
+        summary: str = "图片里是一张猫猫表情包。",
+        ok: bool = True,
+        error: str | None = None,
+    ) -> None:
         self.summary = summary
+        self.ok = ok
+        self.error = error
         self.calls = 0
         self.image_urls: list[str] = []
         self.video_urls: list[str] = []
@@ -71,12 +79,12 @@ class FakeVisionClient:
             trace.event("vision.fake", {"summary": self.summary})
 
         class Result:
-            def __init__(self, summary: str) -> None:
-                self.ok = True
+            def __init__(self, *, ok: bool, summary: str, error: str | None) -> None:
+                self.ok = ok
                 self.summary = summary
-                self.error = None
+                self.error = error
 
-        return Result(self.summary)
+        return Result(ok=self.ok, summary=self.summary, error=self.error)
 
 
 def env(tmp_path: Path) -> dict[str, str]:
@@ -534,6 +542,36 @@ async def test_service_passes_vision_context_to_model_after_trigger(tmp_path: Pa
     assert vision.image_urls == ["https://example.test/cat.jpg"]
     assert "Vision Context:" in model.messages[0]["content"]
     assert "图片里是一张猫猫表情包，看起来很累。" in model.messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_service_warns_model_not_to_guess_when_vision_fails(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    model = CapturingModel()
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+        vision_client=FakeVisionClient(ok=False, error="timeout"),
+    )
+
+    reply = await service.handle(
+        private_msg(
+            "[image: https://example.test/private-image.png]这是哪个",
+            image_urls=["https://example.test/private-image.png"],
+        ),
+        random_value=99,
+    )
+
+    assert reply == "model reply"
+    system_prompt = model.messages[0]["content"]
+    assert "Vision Context:" in system_prompt
+    assert "视觉识别失败" in system_prompt
+    assert "不要猜测图片内容" in system_prompt
+    assert "timeout" in system_prompt
 
 
 @pytest.mark.asyncio
