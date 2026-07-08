@@ -30,19 +30,20 @@ The default persona variant is Wuhan-dialect Chongyue via `PERSONA_VARIANT=diale
 
 ## Local Environment
 
-- The local workspace is usually Windows PowerShell under `C:\Users\AMY\Desktop\tmp`.
-- Use the dedicated conda environment, not base Python.
+- The local workspace is now Ubuntu/WSL under `/home/duscwalk/toys/qqBots`.
+- Use the dedicated conda environment, not base Python. If conda is missing, install Miniconda
+  under `~/miniconda3` and create a fresh Python 3.11 environment.
 - Preferred local Python:
 
-```powershell
-D:\Anaconda\envs\qq-rolebot\python.exe
+```bash
+~/miniconda3/envs/qq-rolebot-wsl/bin/python
 ```
 
 Useful commands:
 
-```powershell
-D:\Anaconda\envs\qq-rolebot\python.exe -m ruff check .
-D:\Anaconda\envs\qq-rolebot\python.exe -m pytest -q
+```bash
+~/miniconda3/envs/qq-rolebot-wsl/bin/python -m ruff check .
+~/miniconda3/envs/qq-rolebot-wsl/bin/python -m pytest -q
 git diff --check
 ```
 
@@ -55,9 +56,9 @@ Use `rg` or `rg --files` for search. Use `apply_patch` for manual edits.
   change config examples, deployment scripts, or behavior descriptions.
 - Before finalizing a code or deploy change, prefer:
 
-```powershell
-D:\Anaconda\envs\qq-rolebot\python.exe -m ruff check .
-D:\Anaconda\envs\qq-rolebot\python.exe -m pytest -q
+```bash
+~/miniconda3/envs/qq-rolebot-wsl/bin/python -m ruff check .
+~/miniconda3/envs/qq-rolebot-wsl/bin/python -m pytest -q
 git diff --check
 ```
 
