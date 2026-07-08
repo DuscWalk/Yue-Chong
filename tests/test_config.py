@@ -45,6 +45,7 @@ def test_load_settings_from_mapping() -> None:
     assert settings.default_random_reply_probability == 8
     assert settings.repeat_reply_enabled is True
     assert settings.repeat_reply_threshold == 2
+    assert settings.context_window_seconds == 600
     assert settings.persona_variant == "dialect"
     assert settings.persona_path.as_posix() == "personas/default_dialect.yaml"
 
@@ -116,6 +117,7 @@ def test_load_settings_reads_repeat_reply_overrides() -> None:
         {
             "REPEAT_REPLY_ENABLED": "false",
             "REPEAT_REPLY_THRESHOLD": "3",
+            "CONTEXT_WINDOW_SECONDS": "120",
         }
     )
 
@@ -123,6 +125,7 @@ def test_load_settings_reads_repeat_reply_overrides() -> None:
 
     assert settings.repeat_reply_enabled is False
     assert settings.repeat_reply_threshold == 3
+    assert settings.context_window_seconds == 120
 
 
 def test_load_settings_reads_tts_defaults() -> None:
@@ -302,6 +305,14 @@ def test_load_settings_rejects_invalid_repeat_reply_threshold() -> None:
     env["REPEAT_REPLY_THRESHOLD"] = "1"
 
     with pytest.raises(ConfigError, match="REPEAT_REPLY_THRESHOLD"):
+        load_settings(env)
+
+
+def test_load_settings_rejects_invalid_context_window() -> None:
+    env = complete_env()
+    env["CONTEXT_WINDOW_SECONDS"] = "0"
+
+    with pytest.raises(ConfigError, match="CONTEXT_WINDOW_SECONDS"):
         load_settings(env)
 
 

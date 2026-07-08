@@ -78,6 +78,7 @@ Required basics:
 - `DEFAULT_RANDOM_REPLY_PROBABILITY`: default random group reply probability for a new group setting. Existing groups can override it with `/bot prob`.
 - `REPEAT_REPLY_ENABLED`: whether the bot joins consecutive repeated group messages.
 - `REPEAT_REPLY_THRESHOLD`: how many consecutive matching messages trigger repeat reply. Minimum is `2`; the same text in the same group is then cooled down for 10 minutes.
+- `CONTEXT_WINDOW_SECONDS`: maximum age of messages included in model context; default is `600`.
 - `VISION_MODEL_ENABLED`: whether to call a separate vision model after the bot has already decided to reply.
 - `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible vision model settings.
 - `VISION_MODEL_TIMEOUT_SECONDS`: timeout for each vision-model or image-fetch call; default is `60`.
@@ -104,6 +105,7 @@ Reply rules:
 - Group message from a non-whitelisted group: ignore.
 - Group disabled or muted: ignore normal chat.
 - `@` bot or reply to bot: reply when the group is enabled.
+- Context: user messages and successful bot replies are stored, but only messages within `CONTEXT_WINDOW_SECONDS` are included in the model prompt.
 - Follow-up window: after a user addresses the bot, their later message in the same group can trigger if it contains a question mark or one of `FOLLOWUP_TRIGGER_KEYWORDS`.
 - Repeat: if `REPEAT_REPLY_ENABLED=true`, the latest `REPEAT_REPLY_THRESHOLD` unaddressed group messages are identical, and at least two users joined the chain, reply with the same text.
 - Keywords: if `KEYWORDS` appears in text, reply.

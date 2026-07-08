@@ -49,6 +49,26 @@ async def test_message_context_is_pruned(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_recent_messages_respects_context_window(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "bot.sqlite3", context_window_seconds=600)
+    await storage.init()
+
+    await storage.save_message(
+        MessageRecord(group_id=123, user_id=456, nickname="amy", text="old", created_at=399)
+    )
+    await storage.save_message(
+        MessageRecord(group_id=123, user_id=456, nickname="amy", text="fresh", created_at=400)
+    )
+    await storage.save_message(
+        MessageRecord(group_id=123, user_id=456, nickname="amy", text="now", created_at=1000)
+    )
+
+    messages = await storage.recent_messages(123, now=1000)
+
+    assert [message.text for message in messages] == ["fresh", "now"]
+
+
+@pytest.mark.asyncio
 async def test_clear_group_context(tmp_path: Path) -> None:
     storage = Storage(tmp_path / "bot.sqlite3")
     await storage.init()

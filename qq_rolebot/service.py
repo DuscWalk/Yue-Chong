@@ -75,6 +75,17 @@ class ChatService:
             return "persona switched to standard"
         return "usage: /bot persona dialect|standard"
 
+    async def _save_bot_reply(self, *, group_id: int, reply: str, created_at: int) -> None:
+        await self.storage.save_message(
+            MessageRecord(
+                group_id=group_id,
+                user_id=self.settings.bot_qq,
+                nickname=self.persona.name,
+                text=reply,
+                created_at=created_at,
+            )
+        )
+
     async def handle(self, message: IncomingMessage, *, random_value: int) -> str | None:
         trace = self._start_trace(message)
         if message.is_private:
@@ -103,6 +114,11 @@ class ChatService:
                 and message.user_id in self.settings.admin_users
             ):
                 reply = self._switch_persona(parts[2].lower())
+                await self._save_bot_reply(
+                    group_id=message.group_id,
+                    reply=reply,
+                    created_at=message.created_at,
+                )
                 self._trace(trace, "reply.final", {"reply": reply, "source": "admin"})
                 return reply
             reply = await handle_admin_command(
@@ -113,12 +129,22 @@ class ChatService:
                 settings=self.settings,
                 storage=self.storage,
             )
+            await self._save_bot_reply(
+                group_id=message.group_id,
+                reply=reply,
+                created_at=message.created_at,
+            )
             self._trace(trace, "reply.final", {"reply": reply, "source": "admin"})
             return reply
 
         group = await self.storage.get_group_settings(message.group_id)
         repeat_reply = await self._repeat_reply(message, muted_until=group.muted_until)
         if repeat_reply is not None and group.enabled:
+            await self._save_bot_reply(
+                group_id=message.group_id,
+                reply=repeat_reply,
+                created_at=message.created_at,
+            )
             self._trace(trace, "reply.final", {"reply": repeat_reply, "source": "repeat"})
             return repeat_reply
 
@@ -172,6 +198,12 @@ class ChatService:
                     max_chars=self.settings.max_output_chars,
                     sensitive_words=self.settings.sensitive_words,
                 )
+                if reply is not None:
+                    await self._save_bot_reply(
+                        group_id=message.group_id,
+                        reply=reply,
+                        created_at=message.created_at,
+                    )
                 self._trace(trace, "reply.final", {"reply": reply, "source": "tool"})
                 return reply
             tool_context = str(getattr(tool_result, "context", "") or "")
@@ -181,7 +213,7 @@ class ChatService:
             tool_context,
             await self._vision_context(message, trace=trace),
         )
-        context = await self.storage.recent_messages(message.group_id)
+        context = await self.storage.recent_messages(message.group_id, now=message.created_at)
         messages = build_chat_messages(self.persona, context, message, tool_context=tool_context)
         self._trace(trace, "model.prompt", {"messages": messages})
         started = time.monotonic()
@@ -209,6 +241,11 @@ class ChatService:
             self._trace(trace, "reply.final", {"reply": None, "source": "guardrails"})
             return None
 
+        await self._save_bot_reply(
+            group_id=message.group_id,
+            reply=reply,
+            created_at=message.created_at,
+        )
         self._trace(trace, "reply.final", {"reply": reply, "source": "model"})
         return reply
 
@@ -254,7 +291,8 @@ class ChatService:
         if message.is_at_bot or message.is_reply_to_bot:
             return None
 
-        context = await self.storage.recent_messages(message.group_id)
+        context = await self.storage.recent_messages(message.group_id, now=message.created_at)
+        context = [item for item in context if item.user_id != self.settings.bot_qq]
         threshold = self.settings.repeat_reply_threshold
         if len(context) < threshold:
             return None
@@ -321,6 +359,12 @@ class ChatService:
                     max_chars=self.settings.max_output_chars,
                     sensitive_words=self.settings.sensitive_words,
                 )
+                if reply is not None:
+                    await self._save_bot_reply(
+                        group_id=context_id,
+                        reply=reply,
+                        created_at=message.created_at,
+                    )
                 self._trace(trace, "reply.final", {"reply": reply, "source": "tool"})
                 return reply
             tool_context = str(getattr(tool_result, "context", "") or "")
@@ -330,7 +374,7 @@ class ChatService:
             tool_context,
             await self._vision_context(message, trace=trace),
         )
-        context = await self.storage.recent_messages(context_id)
+        context = await self.storage.recent_messages(context_id, now=message.created_at)
         messages = build_chat_messages(self.persona, context, message, tool_context=tool_context)
         self._trace(trace, "model.prompt", {"messages": messages})
         started = time.monotonic()
@@ -358,6 +402,7 @@ class ChatService:
             self._trace(trace, "reply.final", {"reply": None, "source": "guardrails"})
             return None
 
+        await self._save_bot_reply(group_id=context_id, reply=reply, created_at=message.created_at)
         self._trace(trace, "reply.final", {"reply": reply, "source": "model"})
         return reply
 

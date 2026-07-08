@@ -25,6 +25,16 @@ class CapturingModel:
         return ModelResult(ok=True, text="model reply")
 
 
+class QueueModel:
+    def __init__(self, replies: list[str]) -> None:
+        self.replies = replies
+        self.messages: list[list[dict[str, str]]] = []
+
+    async def chat(self, messages: list[dict[str, str]]) -> ModelResult:
+        self.messages.append(messages)
+        return ModelResult(ok=True, text=self.replies.pop(0))
+
+
 class CountingModel:
     def __init__(self) -> None:
         self.calls = 0
@@ -134,6 +144,7 @@ def private_msg(
     text: str,
     *,
     sender: int = 99,
+    created_at: int = 100,
     image_urls: list[str] | None = None,
     video_urls: list[str] | None = None,
 ) -> IncomingMessage:
@@ -144,7 +155,7 @@ def private_msg(
         text=text,
         is_at_bot=False,
         is_private=True,
-        created_at=100,
+        created_at=created_at,
         image_urls=image_urls or [],
         video_urls=video_urls or [],
     )
@@ -451,6 +462,29 @@ async def test_service_replies_to_private_message_without_group_enable(tmp_path:
     reply = await service.handle(private_msg("你好"), random_value=99)
 
     assert reply == "model reply"
+
+
+@pytest.mark.asyncio
+async def test_service_saves_bot_replies_in_private_context(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    model = QueueModel(["上一轮答复", "这一轮答复"])
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+    )
+
+    first = await service.handle(private_msg("第一句", created_at=100), random_value=99)
+    second = await service.handle(private_msg("第二句", created_at=101), random_value=99)
+
+    assert first == "上一轮答复"
+    assert second == "这一轮答复"
+    second_context = model.messages[1][1]["content"]
+    assert "Private Amy: 第一句" in second_context
+    assert "重岳: 上一轮答复" in second_context
 
 
 @pytest.mark.asyncio

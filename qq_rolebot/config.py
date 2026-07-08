@@ -76,6 +76,7 @@ class Settings:
     default_random_reply_probability: int
     repeat_reply_enabled: bool
     repeat_reply_threshold: int
+    context_window_seconds: int
     keywords: list[str]
     sensitive_words: list[str]
     tavily_api_key: str
@@ -131,6 +132,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     repeat_reply_threshold = _int(env, "REPEAT_REPLY_THRESHOLD", 2)
     if repeat_reply_threshold < 2:
         raise ConfigError("REPEAT_REPLY_THRESHOLD must be greater than or equal to 2")
+
+    context_window_seconds = _int(env, "CONTEXT_WINDOW_SECONDS", 600)
+    if context_window_seconds < 1:
+        raise ConfigError("CONTEXT_WINDOW_SECONDS must be greater than 0")
 
     max_output_chars = _int(env, "MAX_OUTPUT_CHARS", 280)
     if max_output_chars < 1:
@@ -224,6 +229,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         default_random_reply_probability=probability,
         repeat_reply_enabled=_bool(env, "REPEAT_REPLY_ENABLED", True),
         repeat_reply_threshold=repeat_reply_threshold,
+        context_window_seconds=context_window_seconds,
         keywords=parse_str_list(env.get("KEYWORDS", "")),
         sensitive_words=parse_str_list(env.get("SENSITIVE_WORDS", "")),
         tavily_api_key=env.get("TAVILY_API_KEY", "").strip(),

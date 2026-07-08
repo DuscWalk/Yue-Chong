@@ -94,6 +94,7 @@ Group behavior:
 DEFAULT_RANDOM_REPLY_PROBABILITY=3
 REPEAT_REPLY_ENABLED=true
 REPEAT_REPLY_THRESHOLD=2
+CONTEXT_WINDOW_SECONDS=600
 KEYWORDS=
 FOLLOWUP_WINDOW_SECONDS=90
 FOLLOWUP_TRIGGER_KEYWORDS=你,你觉得,你看,怎么看,咋看,怎么样,如何,说话,回话,大哥,重岳,岳饼
@@ -101,6 +102,7 @@ FOLLOWUP_TRIGGER_KEYWORDS=你,你觉得,你看,怎么看,咋看,怎么样,如何
 
 Existing groups keep their stored probability in SQLite. Use `/bot prob N` in a group to change that group without editing `.env`.
 When `REPEAT_REPLY_ENABLED=true`, the bot can join a repeated-message chain after `REPEAT_REPLY_THRESHOLD` consecutive identical unaddressed group messages from at least two users. After it joins, the same text in the same group is cooled down for 10 minutes.
+`CONTEXT_WINDOW_SECONDS` controls how far back model context can look. Successful bot replies are stored with user messages, and only records inside this window are included in the next prompt.
 
 Tools:
 

@@ -29,6 +29,7 @@ storage = Storage(
     settings.database_path,
     context_limit=20,
     default_probability=settings.default_random_reply_probability,
+    context_window_seconds=settings.context_window_seconds,
 )
 model = ModelClient(
     api_base=settings.model_api_base,

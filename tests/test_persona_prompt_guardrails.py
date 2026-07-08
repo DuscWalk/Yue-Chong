@@ -114,6 +114,7 @@ def test_build_chat_messages_contains_persona_context_and_trigger() -> None:
     assert "Current local time:" in messages[0]["content"]
     assert "1970-01-01 08:00:10" in messages[0]["content"]
     assert "Do not assume it is morning" in messages[0]["content"]
+    assert "Always answer the current final user message" in messages[0]["content"]
     assert "20 Chinese characters" in messages[0]["content"]
     assert "Recent chat context:" in messages[1]["content"]
     assert "[1970-01-01 08:00:09] Bob: good morning" in messages[1]["content"]

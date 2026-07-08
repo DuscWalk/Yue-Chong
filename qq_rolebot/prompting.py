@@ -46,6 +46,11 @@ def build_chat_messages(
             f"Current local time: {current_time} (Asia/Shanghai).",
             "Use the current local time before answering greetings or daily-life questions.",
             "Do not assume it is morning, noon, or evening from persona flavor text.",
+            (
+                "Treat Recent chat context as background only. "
+                "Always answer the current final user message; do not answer old questions "
+                "from Recent chat context unless the current message clearly asks to continue them."
+            ),
             _section("Language", persona.language),
             _section("User name", persona.user_name),
             _section("Profile", persona.profile),

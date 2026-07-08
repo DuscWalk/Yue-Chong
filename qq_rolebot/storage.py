@@ -24,10 +24,17 @@ class MessageRecord:
 
 
 class Storage:
-    def __init__(self, path: Path, context_limit: int = 20, default_probability: int = 8) -> None:
+    def __init__(
+        self,
+        path: Path,
+        context_limit: int = 20,
+        default_probability: int = 8,
+        context_window_seconds: int = 600,
+    ) -> None:
         self.path = path
         self.context_limit = context_limit
         self.default_probability = default_probability
+        self.context_window_seconds = context_window_seconds
 
     async def init(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -149,17 +156,35 @@ class Storage:
             )
             await db.commit()
 
-    async def recent_messages(self, group_id: int) -> list[MessageRecord]:
+    async def recent_messages(
+        self,
+        group_id: int,
+        *,
+        now: int | None = None,
+    ) -> list[MessageRecord]:
+        cutoff = None if now is None else now - self.context_window_seconds
         async with aiosqlite.connect(self.path) as db:
-            rows = await db.execute_fetchall(
-                """
-                SELECT group_id, user_id, nickname, text, created_at
-                FROM message_context
-                WHERE group_id = ?
-                ORDER BY created_at ASC, id ASC
-                """,
-                (group_id,),
-            )
+            if cutoff is None:
+                rows = await db.execute_fetchall(
+                    """
+                    SELECT group_id, user_id, nickname, text, created_at
+                    FROM message_context
+                    WHERE group_id = ?
+                    ORDER BY created_at ASC, id ASC
+                    """,
+                    (group_id,),
+                )
+            else:
+                rows = await db.execute_fetchall(
+                    """
+                    SELECT group_id, user_id, nickname, text, created_at
+                    FROM message_context
+                    WHERE group_id = ?
+                      AND created_at >= ?
+                    ORDER BY created_at ASC, id ASC
+                    """,
+                    (group_id, cutoff),
+                )
             return [
                 MessageRecord(
                     group_id=int(row[0]),
