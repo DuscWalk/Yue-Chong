@@ -47,6 +47,22 @@ def test_load_config_can_disable_onebot_connection_requirement() -> None:
     assert config.watchdog_require_onebot_connection is False
 
 
+def test_load_config_parses_onebot_http_api_settings() -> None:
+    config = load_config(
+        {
+            "WATCHDOG_REQUIRE_ONEBOT_HTTP_API": "true",
+            "WATCHDOG_ONEBOT_HTTP_API_BASE": "http://127.0.0.1:3001",
+            "WATCHDOG_ONEBOT_HTTP_API_TOKEN": "api-token",
+            "WATCHDOG_ONEBOT_HTTP_API_TIMEOUT_SECONDS": "7",
+        }
+    )
+
+    assert config.watchdog_require_onebot_http_api is True
+    assert config.watchdog_onebot_http_api_base == "http://127.0.0.1:3001"
+    assert config.watchdog_onebot_http_api_token == "api-token"
+    assert config.watchdog_onebot_http_api_timeout_seconds == 7
+
+
 def test_load_config_parses_click_webhook_settings() -> None:
     config = load_config(
         {
@@ -117,6 +133,22 @@ def test_evaluate_health_can_ignore_onebot_connection() -> None:
 
     assert report.status == "healthy"
     assert report.reasons == []
+
+
+def test_evaluate_health_requires_onebot_http_api_when_enabled() -> None:
+    config = WatchdogConfig(watchdog_require_onebot_http_api=True)
+    report = evaluate_health(
+        config,
+        bot_active=True,
+        napcat_active=True,
+        tcp_ok=True,
+        onebot_connected=True,
+        onebot_http_api_healthy=False,
+        recent_logs="",
+    )
+
+    assert report.status == "unhealthy"
+    assert "OneBot HTTP API status check failed" in report.reasons
 
 
 def test_onebot_connection_from_ss_detects_local_rolebot_connection() -> None:
@@ -409,6 +441,39 @@ def test_run_watchdog_marks_missing_onebot_connection_unhealthy(tmp_path: Path) 
 
     assert report.status == "unhealthy"
     assert "OneBot reverse WebSocket is not connected" in report.reasons
+    assert len(sent) == 1
+
+
+def test_run_watchdog_marks_failed_onebot_http_api_unhealthy(tmp_path: Path) -> None:
+    sent = []
+    config = WatchdogConfig(
+        watchdog_state_path=str(tmp_path / "state.json"),
+        watchdog_require_onebot_http_api=True,
+        watchdog_onebot_http_api_base="http://127.0.0.1:3001",
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 100.0,
+        token_factory=lambda: "abc123",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+        onebot_connected=lambda cfg: True,
+        onebot_http_api_healthy=lambda cfg: False,
+    )
+
+    report = run_watchdog(config, deps)
+
+    assert report.status == "unhealthy"
+    assert "OneBot HTTP API status check failed" in report.reasons
     assert len(sent) == 1
 
 

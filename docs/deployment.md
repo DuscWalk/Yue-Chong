@@ -433,10 +433,15 @@ TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
 ## 11. NapCat Account Watchdog
 
 The watchdog is a separate one-shot script run by systemd timer. It checks the bot service, NapCat
-service, bot TCP port, OneBot reverse WebSocket connection, and recent NapCat logs. When the account
-appears offline, it sends a QQ Mail alert and attaches the newest fresh QR image when available. If
-the administrator replies to the alert later, the watchdog can refresh NapCat and send a new QR
-email.
+service, bot TCP port, OneBot reverse WebSocket connection, optional OneBot HTTP API account status,
+and recent NapCat logs. When the account appears offline, it sends a QQ Mail alert and attaches the
+newest fresh QR image when available. If the administrator replies to the alert later, the watchdog
+can refresh NapCat and send a new QR email.
+
+For stronger account-state detection, enable a NapCat OneBot HTTP API listener bound only to
+`127.0.0.1`, then set `WATCHDOG_REQUIRE_ONEBOT_HTTP_API=true`. The watchdog calls
+`get_login_info` and `get_status`; failed API calls, nonzero `retcode`, or `online=false` make the
+account unhealthy. Do not expose this HTTP API to the public internet.
 
 HTML-capable mail clients also show a `获取新二维码` button. When
 `WATCHDOG_CLICK_PUBLIC_BASE_URL` is configured, the button opens a server endpoint that refreshes
@@ -453,6 +458,10 @@ WATCHDOG_NAPCAT_SERVICE=napcat.service
 WATCHDOG_HOST=127.0.0.1
 WATCHDOG_PORT=8080
 WATCHDOG_REQUIRE_ONEBOT_CONNECTION=true
+WATCHDOG_REQUIRE_ONEBOT_HTTP_API=false
+WATCHDOG_ONEBOT_HTTP_API_BASE=http://127.0.0.1:3001
+WATCHDOG_ONEBOT_HTTP_API_TOKEN=
+WATCHDOG_ONEBOT_HTTP_API_TIMEOUT_SECONDS=5
 WATCHDOG_LOG_WINDOW_MINUTES=10
 WATCHDOG_STATE_PATH=/opt/qq-rolebot/data/account_watchdog_state.json
 WATCHDOG_SEND_RECOVERY=true

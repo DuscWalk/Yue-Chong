@@ -15,6 +15,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from email.header import decode_header, make_header
@@ -45,6 +47,10 @@ class WatchdogConfig:
     watchdog_host: str = "127.0.0.1"
     watchdog_port: int = 8080
     watchdog_require_onebot_connection: bool = True
+    watchdog_require_onebot_http_api: bool = False
+    watchdog_onebot_http_api_base: str = ""
+    watchdog_onebot_http_api_token: str = ""
+    watchdog_onebot_http_api_timeout_seconds: int = 5
     watchdog_log_window_minutes: int = 10
     watchdog_state_path: str = "/opt/qq-rolebot/data/account_watchdog_state.json"
     watchdog_send_recovery: bool = True
@@ -110,6 +116,7 @@ class WatchdogDependencies:
     sleep: Callable[[float], None]
     log: Callable[[str], None]
     onebot_connected: Callable[[WatchdogConfig], bool] = lambda config: True
+    onebot_http_api_healthy: Callable[[WatchdogConfig], bool] = lambda config: True
 
 
 def _bool(value: str | None, default: bool) -> bool:
@@ -150,6 +157,16 @@ def load_config(env: Mapping[str, str]) -> WatchdogConfig:
         watchdog_require_onebot_connection=_bool(
             env.get("WATCHDOG_REQUIRE_ONEBOT_CONNECTION"),
             True,
+        ),
+        watchdog_require_onebot_http_api=_bool(
+            env.get("WATCHDOG_REQUIRE_ONEBOT_HTTP_API"),
+            False,
+        ),
+        watchdog_onebot_http_api_base=env.get("WATCHDOG_ONEBOT_HTTP_API_BASE", "").rstrip("/"),
+        watchdog_onebot_http_api_token=env.get("WATCHDOG_ONEBOT_HTTP_API_TOKEN", ""),
+        watchdog_onebot_http_api_timeout_seconds=_int(
+            env.get("WATCHDOG_ONEBOT_HTTP_API_TIMEOUT_SECONDS"),
+            5,
         ),
         watchdog_log_window_minutes=_int(env.get("WATCHDOG_LOG_WINDOW_MINUTES"), 10),
         watchdog_state_path=env.get(
@@ -204,6 +221,7 @@ def evaluate_health(
     napcat_active: bool,
     tcp_ok: bool,
     onebot_connected: bool = True,
+    onebot_http_api_healthy: bool = True,
     recent_logs: str,
 ) -> HealthReport:
     reasons: list[str] = []
@@ -215,6 +233,8 @@ def evaluate_health(
         reasons.append(f"{config.watchdog_host}:{config.watchdog_port} is not reachable")
     if config.watchdog_require_onebot_connection and not onebot_connected:
         reasons.append("OneBot reverse WebSocket is not connected")
+    if config.watchdog_require_onebot_http_api and not onebot_http_api_healthy:
+        reasons.append("OneBot HTTP API status check failed")
     if any(marker in recent_logs for marker in OFFLINE_LOG_MARKERS):
         reasons.append("NapCat offline/login-expired marker found")
     if any(marker in recent_logs for marker in MANUAL_LOGIN_LOG_MARKERS):
@@ -641,6 +661,7 @@ def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthRe
         napcat_active=deps.service_is_active(config.watchdog_napcat_service),
         tcp_ok=deps.tcp_connect(config.watchdog_host, config.watchdog_port),
         onebot_connected=deps.onebot_connected(config),
+        onebot_http_api_healthy=deps.onebot_http_api_healthy(config),
         recent_logs=recent_logs,
     )
 
@@ -769,6 +790,52 @@ def onebot_connected(config: WatchdogConfig) -> bool:
     )
 
 
+def _onebot_api_post(config: WatchdogConfig, action: str) -> dict:
+    base = config.watchdog_onebot_http_api_base.rstrip("/")
+    if not base:
+        raise ValueError("WATCHDOG_ONEBOT_HTTP_API_BASE is not configured")
+    request = urllib.request.Request(
+        f"{base}/{action.lstrip('/')}",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    if config.watchdog_onebot_http_api_token:
+        request.add_header("Authorization", f"Bearer {config.watchdog_onebot_http_api_token}")
+    with urllib.request.urlopen(
+        request,
+        timeout=config.watchdog_onebot_http_api_timeout_seconds,
+    ) as response:
+        raw = response.read().decode("utf-8", errors="replace")
+    return json.loads(raw)
+
+
+def onebot_http_api_healthy(config: WatchdogConfig) -> bool:
+    if not config.watchdog_require_onebot_http_api:
+        return True
+    try:
+        login_info = _onebot_api_post(config, "get_login_info")
+        if int(login_info.get("retcode", -1)) != 0:
+            return False
+        status = _onebot_api_post(config, "get_status")
+        if int(status.get("retcode", -1)) != 0:
+            return False
+    except (
+        OSError,
+        TimeoutError,
+        ValueError,
+        json.JSONDecodeError,
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+    ):
+        return False
+
+    data = status.get("data")
+    if isinstance(data, dict) and data.get("online") is False:
+        return False
+    return True
+
+
 def read_recent_logs(config: WatchdogConfig) -> str:
     since = f"-{config.watchdog_log_window_minutes} minutes"
     chunks: list[str] = []
@@ -879,6 +946,7 @@ def default_dependencies() -> WatchdogDependencies:
         sleep=time.sleep,
         log=lambda message: print(message, file=sys.stderr),
         onebot_connected=onebot_connected,
+        onebot_http_api_healthy=onebot_http_api_healthy,
     )
 
 
