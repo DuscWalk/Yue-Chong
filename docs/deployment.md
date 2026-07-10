@@ -119,17 +119,19 @@ Media replies:
 ```dotenv
 MEDIA_REPLY_ENABLED=false
 MEDIA_REPLY_PROBABILITY=0
+MEDIA_REPLY_PRIVATE_PROBABILITY=0
 MEDIA_STICKER_ROOT=/opt/qq-rolebot/stickers
 MEDIA_STICKER_MANIFEST=/opt/qq-rolebot/stickers/manifest.yaml
 MEDIA_REGISTER_CUSTOM_FACES=true
 MEDIA_CUSTOM_FACE_CACHE=/opt/qq-rolebot/data/custom_faces.json
 ```
 
-Active media only appends after a successful model text reply. `MEDIA_REGISTER_CUSTOM_FACES=true`
-registers active image assets to the bot QQ account as custom faces. Locally registered custom faces
-do not necessarily have the `key` needed for NapCat `mface` sends; the bot sends them as custom
-image subtype fallback, or you can provide marketplace `mface` metadata in the manifest for true
-`mface` output.
+Active media only appends after a successful model text reply. `MEDIA_REPLY_PROBABILITY` controls
+default/group appends; `MEDIA_REPLY_PRIVATE_PROBABILITY` can override private chats and inherits the
+default when omitted. `MEDIA_REGISTER_CUSTOM_FACES=true` registers active image assets to the bot QQ
+account as custom faces. Locally registered custom faces do not necessarily have the `key` needed
+for NapCat `mface` sends; the bot sends them as custom image subtype fallback, or you can provide
+marketplace `mface` metadata in the manifest for true `mface` output.
 
 Tools:
 

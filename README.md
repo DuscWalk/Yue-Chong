@@ -91,7 +91,10 @@ Required basics:
 - `CONTEXT_WINDOW_SECONDS`: maximum age of messages included in model context; default is `600`.
 - `MEDIA_REPLY_ENABLED`: whether successful model text replies may append a persistent sticker image
   or a sendable `mface` sticker.
-- `MEDIA_REPLY_PROBABILITY`: `0` to `100`; chance to append a sticker after model text.
+- `MEDIA_REPLY_PROBABILITY`: `0` to `100`; default/group chance to append a sticker after model
+  text.
+- `MEDIA_REPLY_PRIVATE_PROBABILITY`: optional private-chat override; when unset, it inherits
+  `MEDIA_REPLY_PROBABILITY`.
 - `MEDIA_STICKER_ROOT`: persistent sticker asset directory. Production default should be `/opt/qq-rolebot/stickers`.
 - `MEDIA_STICKER_MANIFEST`: optional manifest path; defaults to `MEDIA_STICKER_ROOT/manifest.yaml`.
 - `MEDIA_REGISTER_CUSTOM_FACES`: when true, active image assets are registered to the bot QQ

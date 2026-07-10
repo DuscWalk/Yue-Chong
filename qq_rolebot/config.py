@@ -76,6 +76,7 @@ class Settings:
     default_random_reply_probability: int
     media_reply_enabled: bool
     media_reply_probability: int
+    media_reply_private_probability: int
     media_sticker_root: Path
     media_sticker_manifest: Path
     media_register_custom_faces: bool
@@ -141,6 +142,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     media_reply_probability = _int(env, "MEDIA_REPLY_PROBABILITY", 0)
     if media_reply_probability < 0 or media_reply_probability > 100:
         raise ConfigError("MEDIA_REPLY_PROBABILITY must be between 0 and 100")
+    media_reply_private_probability = _int(
+        env,
+        "MEDIA_REPLY_PRIVATE_PROBABILITY",
+        media_reply_probability,
+    )
+    if media_reply_private_probability < 0 or media_reply_private_probability > 100:
+        raise ConfigError("MEDIA_REPLY_PRIVATE_PROBABILITY must be between 0 and 100")
 
     repeat_reply_threshold = _int(env, "REPEAT_REPLY_THRESHOLD", 2)
     if repeat_reply_threshold < 2:
@@ -262,6 +270,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         default_random_reply_probability=probability,
         media_reply_enabled=_bool(env, "MEDIA_REPLY_ENABLED", False),
         media_reply_probability=media_reply_probability,
+        media_reply_private_probability=media_reply_private_probability,
         media_sticker_root=media_sticker_root,
         media_sticker_manifest=media_sticker_manifest,
         media_register_custom_faces=_bool(env, "MEDIA_REGISTER_CUSTOM_FACES", True),

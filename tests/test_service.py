@@ -613,7 +613,7 @@ async def test_service_appends_sticker_only_after_model_reply(tmp_path: Path) ->
     )
 
     class FakeEnhancer:
-        def enhance(self, reply, *, random_value: int):
+        def enhance(self, reply, *, random_value: int, probability: int | None = None):
             from qq_rolebot.outgoing import OutgoingMessage
 
             return reply.with_message(
@@ -626,6 +626,40 @@ async def test_service_appends_sticker_only_after_model_reply(tmp_path: Path) ->
 
     assert reply is not None
     assert [message.kind for message in reply.messages] == ["text", "image"]
+
+
+@pytest.mark.asyncio
+async def test_service_uses_private_media_probability_override(tmp_path: Path) -> None:
+    raw_env = env(tmp_path)
+    raw_env["MEDIA_REPLY_ENABLED"] = "true"
+    raw_env["MEDIA_REPLY_PROBABILITY"] = "0"
+    raw_env["MEDIA_REPLY_PRIVATE_PROBABILITY"] = "100"
+    settings = load_settings(raw_env)
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=FakeModel(),
+        rate_limiter=RateLimiter(),
+    )
+
+    class CapturingEnhancer:
+        def __init__(self) -> None:
+            self.probabilities: list[int | None] = []
+
+        def enhance(self, reply, *, random_value: int, probability: int | None = None):
+            self.probabilities.append(probability)
+            return reply
+
+    enhancer = CapturingEnhancer()
+    service.reply_enhancer = enhancer
+
+    await service.handle_reply(private_msg("hello"), random_value=50)
+    await service.handle_reply(msg("hello", at_bot=True), random_value=50)
+
+    assert enhancer.probabilities == [100, 0]
 
 
 @pytest.mark.asyncio

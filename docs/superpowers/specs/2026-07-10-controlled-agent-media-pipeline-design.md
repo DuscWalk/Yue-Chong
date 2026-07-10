@@ -160,7 +160,9 @@ items:
 Configuration:
 
 - `MEDIA_REPLY_ENABLED`: enables active media append.
-- `MEDIA_REPLY_PROBABILITY`: percentage chance after a successful model text reply.
+- `MEDIA_REPLY_PROBABILITY`: default/group percentage chance after a successful model text reply.
+- `MEDIA_REPLY_PRIVATE_PROBABILITY`: private-chat override; if omitted, it inherits
+  `MEDIA_REPLY_PROBABILITY`.
 - `MEDIA_STICKER_ROOT`: persistent server asset root, defaulting to `stickers` locally and
   `/opt/qq-rolebot/stickers` in production docs.
 - `MEDIA_STICKER_MANIFEST`: optional manifest path, defaulting to

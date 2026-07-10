@@ -16,12 +16,19 @@ class ReplyEnhancer:
         self.probability = probability
         self.library = library
 
-    def enhance(self, reply: OutgoingReply, *, random_value: int) -> OutgoingReply:
+    def enhance(
+        self,
+        reply: OutgoingReply,
+        *,
+        random_value: int,
+        probability: int | None = None,
+    ) -> OutgoingReply:
         if not self.enabled or self.library is None:
             return reply
         if reply.is_empty or not reply.text.strip():
             return reply
-        if self.probability <= 0 or random_value >= self.probability:
+        active_probability = self.probability if probability is None else probability
+        if active_probability <= 0 or random_value >= active_probability:
             return reply
         item = self.library.select(tags=["reply"], random_value=random_value)
         if item is None:

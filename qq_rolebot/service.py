@@ -90,6 +90,26 @@ class ChatService:
         self.reply_enhancer = None
         self.persona = load_persona(settings.persona_path)
 
+    def _enhance_outgoing_reply(
+        self,
+        message: IncomingMessage,
+        reply: OutgoingReply,
+        *,
+        random_value: int,
+    ) -> OutgoingReply:
+        if self.reply_enhancer is None:
+            return reply
+        probability = (
+            self.settings.media_reply_private_probability
+            if message.is_private
+            else self.settings.media_reply_probability
+        )
+        return self.reply_enhancer.enhance(
+            reply,
+            random_value=random_value,
+            probability=probability,
+        )
+
     def _switch_persona(self, variant: str) -> str:
         if variant == "dialect":
             self.persona = load_persona(self.settings.persona_path.parent / "default_dialect.yaml")
@@ -289,9 +309,7 @@ class ChatService:
         )
         self._trace(trace, "reply.final", {"reply": reply, "source": "model"})
         outgoing = OutgoingReply.text(reply, source="model")
-        if self.reply_enhancer is not None:
-            outgoing = self.reply_enhancer.enhance(outgoing, random_value=random_value)
-        return outgoing
+        return self._enhance_outgoing_reply(message, outgoing, random_value=random_value)
 
     async def _vision_context(
         self,
@@ -559,9 +577,7 @@ class ChatService:
         await self._save_bot_reply(group_id=context_id, reply=reply, created_at=message.created_at)
         self._trace(trace, "reply.final", {"reply": reply, "source": "model"})
         outgoing = OutgoingReply.text(reply, source="model")
-        if self.reply_enhancer is not None:
-            outgoing = self.reply_enhancer.enhance(outgoing, random_value=random_value)
-        return outgoing
+        return self._enhance_outgoing_reply(message, outgoing, random_value=random_value)
 
     def _start_trace(self, message: IncomingMessage) -> DebugTrace | None:
         if self.trace_logger is None:

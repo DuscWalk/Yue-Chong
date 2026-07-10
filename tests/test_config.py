@@ -135,6 +135,7 @@ def test_load_settings_reads_media_defaults() -> None:
 
     assert settings.media_reply_enabled is False
     assert settings.media_reply_probability == 0
+    assert settings.media_reply_private_probability == 0
     assert settings.media_sticker_root.as_posix() == "stickers"
     assert settings.media_sticker_manifest.as_posix() == "stickers/manifest.yaml"
 
@@ -145,6 +146,7 @@ def test_load_settings_reads_media_overrides() -> None:
         {
             "MEDIA_REPLY_ENABLED": "true",
             "MEDIA_REPLY_PROBABILITY": "35",
+            "MEDIA_REPLY_PRIVATE_PROBABILITY": "80",
             "MEDIA_STICKER_ROOT": "/opt/qq-rolebot/stickers",
             "MEDIA_STICKER_MANIFEST": "/opt/qq-rolebot/stickers/custom.yaml",
         }
@@ -154,8 +156,18 @@ def test_load_settings_reads_media_overrides() -> None:
 
     assert settings.media_reply_enabled is True
     assert settings.media_reply_probability == 35
+    assert settings.media_reply_private_probability == 80
     assert settings.media_sticker_root.as_posix() == "/opt/qq-rolebot/stickers"
     assert settings.media_sticker_manifest.as_posix() == "/opt/qq-rolebot/stickers/custom.yaml"
+
+
+def test_load_settings_private_media_probability_inherits_global() -> None:
+    env = complete_env()
+    env["MEDIA_REPLY_PROBABILITY"] = "35"
+
+    settings = load_settings(env)
+
+    assert settings.media_reply_private_probability == 35
 
 
 def test_load_settings_parses_custom_face_registration_settings() -> None:
@@ -174,6 +186,14 @@ def test_load_settings_rejects_invalid_media_probability() -> None:
     env["MEDIA_REPLY_PROBABILITY"] = "101"
 
     with pytest.raises(ConfigError, match="MEDIA_REPLY_PROBABILITY"):
+        load_settings(env)
+
+
+def test_load_settings_rejects_invalid_private_media_probability() -> None:
+    env = complete_env()
+    env["MEDIA_REPLY_PRIVATE_PROBABILITY"] = "101"
+
+    with pytest.raises(ConfigError, match="MEDIA_REPLY_PRIVATE_PROBABILITY"):
         load_settings(env)
 
 

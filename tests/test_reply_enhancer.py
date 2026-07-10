@@ -34,6 +34,18 @@ def test_reply_enhancer_appends_sticker_after_text(tmp_path: Path) -> None:
     assert reply.messages[1].summary == "[动画表情]"
 
 
+def test_reply_enhancer_accepts_probability_override(tmp_path: Path) -> None:
+    enhancer = ReplyEnhancer(enabled=True, probability=0, library=build_library(tmp_path))
+
+    reply = enhancer.enhance(
+        OutgoingReply.text("一切安好。", source="model"),
+        random_value=50,
+        probability=100,
+    )
+
+    assert [message.kind for message in reply.messages] == ["text", "image"]
+
+
 def test_reply_enhancer_never_creates_standalone_reply(tmp_path: Path) -> None:
     enhancer = ReplyEnhancer(enabled=True, probability=100, library=build_library(tmp_path))
 
