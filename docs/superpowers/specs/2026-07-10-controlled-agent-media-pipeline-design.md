@@ -12,7 +12,9 @@ The pipeline must keep production chat safety predictable:
 - Active image or sticker replies are only attached to an existing model text reply.
 - Repeat (`+1`) media replies reuse temporary media from the current chat flow and do not persist
   remote QQ/NapCat media.
-- Active images and stickers come only from a server-persistent asset library.
+- Active images and stickers come only from a server-persistent asset library. Image files in that
+  active library should be registered to the bot QQ account as custom stickers before being used for
+  active sticker sends.
 
 The current repository state is tagged as `v1.0`; this work is the next iteration.
 
@@ -24,7 +26,7 @@ The current repository state is tagged as `v1.0`; this work is the next iteratio
 - Do not commit real sticker packs, QQ account data, generated cache files, API keys, or other
   server-only artifacts.
 - Do not change the existing public trigger behavior except where media repeat adds a matching
-  image or face output.
+  text, image, face, or custom sticker output.
 
 ## Current State
 
@@ -51,7 +53,7 @@ Use a controlled agent pipeline with these boundaries:
 2. `RepeatPolicy`
    - Runs before model calls.
    - Short-circuits normal model handling for eligible repeat chains.
-   - Supports text, image, and QQ face repeat signatures.
+   - Supports text, image, QQ face, and QQ custom sticker repeat signatures.
    - Requires the existing minimum threshold, multiple users, group enabled state, and cooldown.
 
 3. `AgentRunner`
@@ -64,18 +66,20 @@ Use a controlled agent pipeline with these boundaries:
 4. `ReplyEnhancer`
    - Runs after model text is accepted by guardrails.
    - Optionally appends active image or sticker messages from the persistent server asset library.
+   - Prefers registered QQ custom sticker output when NapCat exposes enough metadata, and falls back
+     to ordinary image output when registration or custom sticker rendering is unavailable.
    - Never creates a reply by itself; active media is attached only to a model-approved text reply.
 
 5. `OutgoingReply`
    - A transport-neutral reply object containing ordered outbound messages.
    - Supports separate messages so active replies can send text first and image/sticker second.
-   - Supports text, image, face, and record messages without exposing OneBot details to the service
-     layer.
+   - Supports text, image, face, custom sticker, and record messages without exposing OneBot details
+     to the service layer.
 
 6. `TransportRenderer`
    - Lives in the NoneBot plugin boundary.
-   - Converts `OutgoingReply` messages into OneBot `MessageSegment.text`, `image`, `face`, or
-     `record` sends.
+   - Converts `OutgoingReply` messages into OneBot `MessageSegment.text`, `image`, `face`, custom
+     sticker (`mface`), or `record` sends.
    - Sends each outbound message in order as a separate `bot.send(...)` call.
 
 ## Outgoing Reply Model
@@ -85,11 +89,15 @@ Introduce transport-neutral dataclasses similar to:
 ```python
 @dataclass(frozen=True)
 class OutgoingMessage:
-    kind: Literal["text", "image", "face", "record"]
+    kind: Literal["text", "image", "face", "mface", "record"]
     text: str = ""
     file: str = ""
     url: str = ""
     face_id: str = ""
+    emoji_id: str = ""
+    emoji_package_id: str = ""
+    key: str = ""
+    summary: str = ""
     source: str = ""
 
 
@@ -102,10 +110,14 @@ class OutgoingReply:
 Rules:
 
 - A normal model reply returns one text message.
-- An active sticker reply returns two messages: text first, image second.
+- An active sticker reply returns two messages: text first, custom sticker second when available,
+  otherwise image second.
 - A text repeat returns one text message.
 - An image repeat returns one image message using the temporary media reference.
 - A face repeat returns one face message using the QQ face id.
+- A custom sticker repeat returns one custom sticker message using the received `mface` metadata.
+- If custom sticker metadata is incomplete, repeat falls back to the original image reference when
+  present, otherwise no media output is sent.
 - TTS may render the text message as record at the plugin boundary or through a later renderer
   step. The first implementation may keep existing TTS behavior and skip active sticker append when
   voice is sent if that keeps the migration smaller.
@@ -136,6 +148,7 @@ Manifest shape:
 items:
   - id: calm-01
     file: chongyue/calm-01.webp
+    type: custom_face
     tags: [calm, reply]
     weight: 1
 ```
@@ -155,6 +168,19 @@ Storage and deployment:
 - The deploy script preserves `/opt/qq-rolebot/stickers` or the in-app `stickers/` directory under
   `/opt/qq-rolebot`.
 - The repository may include a small example manifest if needed, but not private or large assets.
+- Registration cache files are server runtime artifacts and must not be committed.
+
+Custom sticker registration:
+
+- At startup or through an explicit maintenance helper, scan active library image files and call
+  NapCat `/add_custom_face` for each file that has not already been registered by file hash.
+- After registration, call NapCat custom face detail/list APIs to build a local registry from
+  library item id or file hash to custom sticker metadata.
+- Registered metadata must include enough fields to send a NapCat `mface` message segment:
+  `emoji_id`, `emoji_package_id`, `key`, and `summary`.
+- If NapCat returns no matching metadata after registration, keep the item usable as ordinary
+  image output and mark the registry entry as pending or image-only.
+- Registry data belongs under the server data directory, not in git.
 
 Selection behavior:
 
@@ -163,6 +189,8 @@ Selection behavior:
 - The model must not choose arbitrary file paths.
 - Later iterations can let the model suggest a semantic tag, but code still maps tags to known
   manifest entries.
+- Active sends should prefer the selected item's registered custom sticker metadata. If rendering
+  the custom sticker fails, the plugin may fall back to the selected image file.
 
 ## Temporary Repeat Media
 
@@ -184,11 +212,22 @@ For QQ face repeat:
 - Preserve the `face` segment id.
 - Repeat with `MessageSegment.face(id)` at the renderer boundary.
 
+For QQ custom sticker repeat:
+
+- Preserve incoming `mface` metadata when NapCat reports a message as `mface`.
+- Also detect NapCat marketplace/custom stickers that arrive as special `image` segments, such as
+  segments whose data contains custom sticker fields or `file == "marketface"`.
+- Repeat with a raw OneBot `mface` message segment when the required metadata is present.
+- Do not add repeated custom stickers to the persistent active asset library.
+- If only an image URL or file is available, repeat as ordinary image, preserving the original
+  visible format as closely as the transport allows.
+
 Repeat matching should compare a stable repeat signature:
 
 - Text: normalized message text.
 - Image: image marker or repeat media reference.
 - Face: face id.
+- Custom sticker: package id, emoji id, and key.
 
 The existing repeat constraints remain in force:
 
@@ -212,7 +251,8 @@ Group addressed or triggered message:
 5. Controlled tools build context for time, search, persona sources, and vision when applicable.
 6. `AgentRunner` builds messages and calls the chat model.
 7. Guardrails clean the model text.
-8. `ReplyEnhancer` optionally appends a persistent sticker image.
+8. `ReplyEnhancer` optionally appends a persistent registered custom sticker, falling back to a
+   persistent image file when custom sticker metadata is unavailable.
 9. Service stores text representation of successful bot outputs for context.
 10. Plugin renders ordered messages as separate sends.
 
@@ -228,9 +268,11 @@ Private message:
 - If active sticker manifest loading fails, log/trace the error and continue with text-only replies.
 - If a selected sticker file is missing, skip that sticker and continue with text-only replies.
 - If the text send succeeds but image send fails, do not retract or add a new apology message.
-- If image repeat rendering fails, do not persist the failed temporary reference.
-- Debug traces may record sticker ids, tags, and relative paths, but must not include secrets or
-  login URLs.
+- If image or custom sticker repeat rendering fails, do not persist the failed temporary reference.
+- If custom sticker registration fails at startup, log the item id and reason, continue with
+  image fallback, and retry on the next registration pass.
+- Debug traces may record sticker ids, tags, relative paths, custom sticker ids, and registration
+  status, but must not include secrets or login URLs.
 
 ## Testing Strategy
 
@@ -238,9 +280,11 @@ Unit tests:
 
 - Config parses media settings and rejects invalid probabilities.
 - Sticker library loads a manifest, ignores missing files, and selects weighted assets.
-- `RepeatPolicy` returns text, image, and face `OutgoingReply` objects under existing threshold,
-  multi-user, group enabled, and cooldown rules.
+- Sticker registration maps manifest items to custom sticker metadata and preserves image fallback.
+- `RepeatPolicy` returns text, image, face, and custom sticker `OutgoingReply` objects under
+  existing threshold, multi-user, group enabled, and cooldown rules.
 - Active media append only happens after a successful model text reply.
+- Active media append prefers custom sticker output when registered metadata exists.
 - Active media append never creates a standalone reply when trigger policy or guardrails suppress
   text.
 
@@ -249,6 +293,7 @@ Plugin tests:
 - Renderer sends text and image as separate `bot.send(...)` calls in order.
 - Renderer sends temporary repeat image with `MessageSegment.image(...)`.
 - Renderer sends QQ face repeat with `MessageSegment.face(...)`.
+- Renderer sends custom sticker repeat and registered active stickers with a raw `mface` segment.
 - Existing TTS fallback behavior remains covered.
 
 Docs and deployment tests:
