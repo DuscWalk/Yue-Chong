@@ -94,3 +94,45 @@ def test_extract_repeat_media_reads_image_file_or_url() -> None:
     assert media.file == "abc.image"
     assert media.url == "https://example.test/a.jpg"
     assert media.signature == "image:abc.image"
+
+
+def test_extract_repeat_media_reads_mface_segment() -> None:
+    message = [
+        segment(
+            "mface",
+            emoji_id="123",
+            emoji_package_id=456,
+            key="send-key",
+            summary="[测试表情]",
+        )
+    ]
+
+    media = message_segments.extract_repeat_media(message)
+
+    assert media.kind == "mface"
+    assert media.emoji_id == "123"
+    assert media.emoji_package_id == "456"
+    assert media.key == "send-key"
+    assert media.summary == "[测试表情]"
+    assert media.signature == "mface:456:123:send-key"
+
+
+def test_extract_repeat_media_reads_marketface_image_segment() -> None:
+    message = [
+        segment(
+            "image",
+            file="ab-123.gif",
+            url="https://example.test/ab-123.gif",
+            emoji_id="123",
+            emoji_package_id=456,
+            key="send-key",
+            summary="[商城表情]",
+        )
+    ]
+
+    media = message_segments.extract_repeat_media(message)
+
+    assert media.kind == "mface"
+    assert media.file == "ab-123.gif"
+    assert media.url == "https://example.test/ab-123.gif"
+    assert media.signature == "mface:456:123:send-key"

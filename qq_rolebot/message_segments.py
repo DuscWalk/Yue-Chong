@@ -33,9 +33,15 @@ class RepeatMedia:
     file: str = ""
     url: str = ""
     face_id: str = ""
+    emoji_id: str = ""
+    emoji_package_id: str = ""
+    key: str = ""
+    summary: str = ""
 
     @property
     def signature(self) -> str:
+        if self.kind == "mface" and self.emoji_id and self.emoji_package_id and self.key:
+            return f"mface:{self.emoji_package_id}:{self.emoji_id}:{self.key}"
         if self.kind == "face" and self.face_id:
             return f"face:{self.face_id}"
         if self.kind == "image":
@@ -73,6 +79,29 @@ def _is_http_url(value: str) -> bool:
 def _is_dynamic_media_url(value: str) -> bool:
     path = urlparse(value).path.lower()
     return any(path.endswith(extension) for extension in _DYNAMIC_MEDIA_EXTENSIONS)
+
+
+def _mface_from_data(
+    data: dict[str, Any],
+    *,
+    file_value: str = "",
+    url_value: str = "",
+) -> RepeatMedia | None:
+    emoji_id = _first_value(data, ("emoji_id", "emojiId", "emoId"))
+    emoji_package_id = _first_value(data, ("emoji_package_id", "emojiPackageId", "epId"))
+    key = _first_value(data, ("key",))
+    summary = _first_value(data, ("summary", "faceName", "desc")) or "[商城表情]"
+    if not (emoji_id and emoji_package_id and key):
+        return None
+    return RepeatMedia(
+        kind="mface",
+        file=file_value,
+        url=url_value,
+        emoji_id=emoji_id,
+        emoji_package_id=emoji_package_id,
+        key=key,
+        summary=summary,
+    )
 
 
 def summarize_segments(message: Iterable[Any]) -> str:
@@ -138,6 +167,12 @@ def extract_media_urls(message: Iterable[Any]) -> MediaUrls:
 
 def extract_repeat_media(message: Iterable[Any]) -> RepeatMedia:
     for segment in message:
+        if _segment_type(segment) != "mface":
+            continue
+        media = _mface_from_data(_data(segment))
+        if media is not None:
+            return media
+    for segment in message:
         if _segment_type(segment) != "face":
             continue
         face_id = _first_value(_data(segment), ("id",))
@@ -149,6 +184,9 @@ def extract_repeat_media(message: Iterable[Any]) -> RepeatMedia:
         data = _data(segment)
         file_value = _first_value(data, ("file",))
         url_value = _first_value(data, ("url",))
+        mface = _mface_from_data(data, file_value=file_value, url_value=url_value)
+        if mface is not None:
+            return mface
         if file_value or url_value:
             return RepeatMedia(kind="image", file=file_value, url=url_value)
     return RepeatMedia()
