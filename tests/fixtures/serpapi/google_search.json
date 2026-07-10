@@ -1,0 +1,20 @@
+{
+  "search_metadata": {"status": "Success"},
+  "organic_results": [
+    {
+      "title": "重岳 - 明日方舟官方网站",
+      "link": "https://arknights.global/character/chongyue?utm_campaign=test",
+      "snippet": "重岳是游戏明日方舟中的角色。"
+    },
+    {
+      "title": "重岳角色资料",
+      "link": "https://wiki.example/chongyue",
+      "snippet": "明日方舟角色重岳资料。"
+    },
+    {
+      "title": "重岳 Cosplay",
+      "link": "https://social.example/cosplay",
+      "snippet": "玩家 cosplay 重岳，照片并非角色原图。"
+    }
+  ]
+}
