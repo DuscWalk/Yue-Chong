@@ -75,26 +75,33 @@ class FakeVisionClient:
         self.calls = 0
         self.image_urls: list[str] = []
         self.video_urls: list[str] = []
+        self.user_question = ""
+        self.chat_context = ""
 
     async def describe(
         self,
         image_urls: list[str],
         video_urls: list[str] | None = None,
+        *,
+        user_question: str,
+        chat_context: str,
         trace=None,
     ):
         self.calls += 1
         self.image_urls = image_urls
         self.video_urls = video_urls or []
+        self.user_question = user_question
+        self.chat_context = chat_context
         if trace is not None:
             trace.event("vision.fake", {"summary": self.summary})
 
         class Result:
-            def __init__(self, *, ok: bool, summary: str, error: str | None) -> None:
+            def __init__(self, *, ok: bool, context_text: str, error: str | None) -> None:
                 self.ok = ok
-                self.summary = summary
+                self.context_text = context_text
                 self.error = error
 
-        return Result(ok=self.ok, summary=self.summary, error=self.error)
+        return Result(ok=self.ok, context_text=self.summary, error=self.error)
 
 
 def env(tmp_path: Path) -> dict[str, str]:
@@ -690,6 +697,8 @@ async def test_service_passes_vision_context_to_model_after_trigger(tmp_path: Pa
     assert reply == "model reply"
     assert vision.calls == 1
     assert vision.image_urls == ["https://example.test/cat.jpg"]
+    assert vision.user_question == "[image: https://example.test/cat.jpg]"
+    assert "Amy" in vision.chat_context
     assert "Vision Context:" in model.messages[0]["content"]
     assert "图片里是一张猫猫表情包，看起来很累。" in model.messages[0]["content"]
 
@@ -800,7 +809,7 @@ async def test_service_warns_model_not_to_guess_when_vision_fails(tmp_path: Path
     assert "Vision Context:" in system_prompt
     assert "视觉识别失败" in system_prompt
     assert "不要猜测图片内容" in system_prompt
-    assert "timeout" in system_prompt
+    assert "timeout" not in system_prompt
 
 
 @pytest.mark.asyncio

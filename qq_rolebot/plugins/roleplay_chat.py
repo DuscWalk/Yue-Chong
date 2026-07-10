@@ -5,12 +5,13 @@ import random
 import time
 from collections import defaultdict
 
-from nonebot import get_driver, on_message
+from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
 
 from qq_rolebot.config import load_settings
 from qq_rolebot.custom_faces import CustomFaceRegistrar
 from qq_rolebot.debug_trace import DebugTraceLogger
+from qq_rolebot.image_preprocessor import ImagePreprocessor
 from qq_rolebot.message_segments import (
     MediaUrls,
     extract_media_urls,
@@ -25,19 +26,41 @@ from qq_rolebot.persona import load_persona
 from qq_rolebot.persona_sources import PersonaSourceClient
 from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter
 from qq_rolebot.reply_enhancer import ReplyEnhancer
+from qq_rolebot.serpapi_client import SerpApiLensClient, SerpApiWebClient
 from qq_rolebot.service import ChatService
 from qq_rolebot.stickers import StickerLibrary
 from qq_rolebot.storage import Storage
 from qq_rolebot.tavily import TavilyClient
+from qq_rolebot.temp_image_store import R2TemporaryImageStore
 from qq_rolebot.time_tool import TimeTool
 from qq_rolebot.tool_router import ToolRouter
 from qq_rolebot.tool_runner import ToolRunner
 from qq_rolebot.tts_client import TTSClient
-from qq_rolebot.vision_client import VisionClient
+from qq_rolebot.vision_cache import VisionCache
+from qq_rolebot.vision_client import VisualAnalyzer
+from qq_rolebot.vision_pipeline import VisionPipeline
+from qq_rolebot.vision_resolver import VisionEvidenceResolver
 from qq_rolebot.voice_policy import VoicePolicy
 from qq_rolebot.voice_service import VoiceService
 
 settings = load_settings()
+
+
+def vision_settings_complete(candidate_settings) -> bool:
+    return all(
+        (
+            candidate_settings.vision_model_api_base,
+            candidate_settings.vision_model_api_key,
+            candidate_settings.vision_model_name,
+            candidate_settings.serpapi_api_key,
+            candidate_settings.r2_account_id,
+            candidate_settings.r2_access_key_id,
+            candidate_settings.r2_secret_access_key,
+            candidate_settings.r2_bucket,
+        )
+    )
+
+
 storage = Storage(
     settings.database_path,
     context_limit=20,
@@ -77,25 +100,54 @@ tool_runner = ToolRunner(
     enable_persona_sources=settings.tools_enable_persona_sources,
 )
 vision_client = None
-if (
-    settings.vision_model_enabled
-    and settings.vision_model_api_base
-    and settings.vision_model_api_key
-    and settings.vision_model_name
-):
-    vision_client = VisionClient(
-        api_base=settings.vision_model_api_base,
-        api_key=settings.vision_model_api_key,
-        model_name=settings.vision_model_name,
-        timeout_seconds=settings.vision_model_timeout_seconds,
-        max_images=settings.vision_model_max_images,
-        mode=settings.vision_model_mode,
-        search_input=settings.vision_model_search_input,
-        enable_thinking=settings.vision_model_enable_thinking,
-        enable_search=settings.vision_model_enable_search,
-        video_fps=settings.vision_model_video_fps,
-        search_timeout_seconds=settings.vision_model_search_timeout_seconds,
+vision_cache = None
+vision_ready = vision_settings_complete(settings)
+if settings.vision_model_enabled and vision_ready:
+    vision_cache = VisionCache(
+        settings.vision_cache_path,
+        ttl_seconds=settings.vision_pipeline_cache_ttl_seconds,
     )
+    vision_client = VisionPipeline(
+        preprocessor=ImagePreprocessor(
+            timeout_seconds=settings.vision_model_timeout_seconds,
+            max_download_bytes=settings.vision_pipeline_max_download_bytes,
+            max_image_pixels=settings.vision_pipeline_max_image_pixels,
+        ),
+        analyzer=VisualAnalyzer(
+            api_base=settings.vision_model_api_base,
+            api_key=settings.vision_model_api_key,
+            model_name=settings.vision_model_name,
+            timeout_seconds=settings.vision_model_timeout_seconds,
+            enable_thinking=settings.vision_model_enable_thinking,
+            video_fps=settings.vision_model_video_fps,
+        ),
+        lens_client=SerpApiLensClient(
+            api_key=settings.serpapi_api_key,
+            timeout_seconds=settings.serpapi_timeout_seconds,
+            exact_limit=settings.serpapi_lens_exact_limit,
+            visual_limit=settings.serpapi_lens_visual_limit,
+        ),
+        web_client=SerpApiWebClient(
+            api_key=settings.serpapi_api_key,
+            timeout_seconds=settings.serpapi_timeout_seconds,
+        ),
+        temp_store=R2TemporaryImageStore(
+            bucket=settings.r2_bucket,
+            object_prefix=settings.r2_object_prefix,
+            presigned_url_seconds=settings.r2_presigned_url_seconds,
+            account_id=settings.r2_account_id,
+            access_key_id=settings.r2_access_key_id,
+            secret_access_key=settings.r2_secret_access_key,
+        ),
+        resolver=VisionEvidenceResolver(),
+        cache=vision_cache,
+        total_timeout_seconds=settings.vision_pipeline_timeout_seconds,
+        max_images=settings.vision_pipeline_max_images,
+        web_candidate_limit=settings.serpapi_web_candidate_limit,
+        cache_version=f"evidence-v1:{settings.vision_model_name}",
+    )
+elif settings.vision_model_enabled:
+    logger.error("Vision pipeline disabled because model, SerpApi, or R2 settings are incomplete")
 service = ChatService(
     settings=settings,
     storage=storage,
@@ -157,6 +209,13 @@ _custom_faces_registered = False
 
 async def init_storage() -> None:
     await storage.init()
+    if vision_cache is not None:
+        await vision_cache.init()
+
+
+async def close_vision_pipeline() -> None:
+    if vision_client is not None:
+        await vision_client.close()
 
 
 class BotCustomFaceClient:
@@ -199,6 +258,7 @@ except ValueError:
 
 if driver is not None:
     driver.on_startup(init_storage)
+    driver.on_shutdown(close_vision_pipeline)
     if hasattr(driver, "on_bot_connect"):
         driver.on_bot_connect(register_custom_faces)
 

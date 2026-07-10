@@ -39,6 +39,26 @@ def test_roleplay_plugin_imports(monkeypatch) -> None:
     assert hasattr(module, "extract_message_text")
 
 
+def test_plugin_requires_complete_vision_provider_settings(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    complete = replace(
+        module.settings,
+        vision_model_api_base="https://vision.test/v1",
+        vision_model_api_key="vision-key",
+        vision_model_name="vision-model",
+        serpapi_api_key="serp-key",
+        r2_account_id="account",
+        r2_access_key_id="access",
+        r2_secret_access_key="secret",
+        r2_bucket="bucket",
+    )
+
+    assert module.vision_settings_complete(complete) is True
+    assert module.vision_settings_complete(replace(complete, serpapi_api_key="")) is False
+    assert module.vision_settings_complete(replace(complete, r2_bucket="")) is False
+
+
 def test_render_outgoing_message_renders_mface(monkeypatch) -> None:
     set_env(monkeypatch)
     module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")

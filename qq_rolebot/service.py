@@ -34,7 +34,7 @@ VISUAL_FOLLOWUP_HINTS = (
 )
 VISION_FAILURE_CONTEXT = (
     "Vision Context:\n"
-    "视觉识别失败：{error}。这条消息包含图片、表情包、动图或视频，"
+    "视觉识别失败。这条消息包含图片、表情包、动图或视频，"
     "但当前没有可靠视觉内容；不要猜测图片内容、角色身份、文字或来源。"
     "如果用户询问图片是谁或是什么，应说明暂时看不清或识别超时。"
 )
@@ -50,6 +50,9 @@ class VisionClientProtocol(Protocol):
         self,
         image_urls: list[str],
         video_urls: list[str] | None = None,
+        *,
+        user_question: str,
+        chat_context: str,
         trace: DebugTrace | None = None,
     ):
         ...
@@ -341,21 +344,24 @@ class ChatService:
                 {"context": "", "reason": "no vision client or media"},
             )
             return ""
+        recent_context = await self.storage.recent_messages(context_id, now=message.created_at)
         result = await self.vision_client.describe(
             message.image_urls,
             video_urls=message.video_urls,
+            user_question=message.text,
+            chat_context=self._vision_chat_context(recent_context),
             trace=trace,
         )
         if not getattr(result, "ok", False):
             error = str(getattr(result, "error", "") or "unknown vision error")
-            context = VISION_FAILURE_CONTEXT.format(error=error)
+            context = VISION_FAILURE_CONTEXT
             self._trace(
                 trace,
                 "vision.context",
                 {"context": context, "error": error},
             )
             return context
-        summary = str(getattr(result, "summary", "") or "").strip()
+        summary = str(getattr(result, "context_text", "") or "").strip()
         if not summary:
             self._trace(trace, "vision.context", {"context": "", "reason": "empty summary"})
             return ""
@@ -369,6 +375,11 @@ class ChatService:
         context = self._format_vision_context(summary, media_marker=media_marker)
         self._trace(trace, "vision.context", {"context": context})
         return context
+
+    @staticmethod
+    def _vision_chat_context(records: list[MessageRecord]) -> str:
+        lines = [f"{record.nickname}: {record.text}" for record in records[-8:]]
+        return "\n".join(lines)[-2000:]
 
     @staticmethod
     def _join_context(*items: str) -> str:
