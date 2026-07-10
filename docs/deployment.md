@@ -155,22 +155,41 @@ VISION_MODEL_ENABLED=false
 VISION_MODEL_API_BASE=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 VISION_MODEL_API_KEY=
 VISION_MODEL_NAME=qwen3.7-plus
-VISION_MODEL_MODE=hybrid
-VISION_MODEL_SEARCH_INPUT=data_url
-VISION_MODEL_TIMEOUT_SECONDS=60
-VISION_MODEL_SEARCH_TIMEOUT_SECONDS=90
-VISION_MODEL_MAX_IMAGES=2
-VISION_MODEL_ENABLE_THINKING=true
-VISION_MODEL_ENABLE_SEARCH=true
+VISION_MODEL_TIMEOUT_SECONDS=8
+VISION_MODEL_ENABLE_THINKING=false
 VISION_MODEL_VIDEO_FPS=2
+VISION_PIPELINE_TIMEOUT_SECONDS=15
+VISION_PIPELINE_MAX_IMAGES=2
+VISION_PIPELINE_CACHE_TTL_SECONDS=86400
+VISION_PIPELINE_MAX_DOWNLOAD_BYTES=10485760
+VISION_PIPELINE_MAX_IMAGE_PIXELS=20000000
+VISION_CACHE_PATH=/opt/qq-rolebot/data/vision_cache.sqlite3
+SERPAPI_API_KEY=
+SERPAPI_LENS_ENABLED=true
+SERPAPI_SEARCH_ENABLED=true
+SERPAPI_TIMEOUT_SECONDS=8
+SERPAPI_LENS_EXACT_LIMIT=5
+SERPAPI_LENS_VISUAL_LIMIT=10
+SERPAPI_WEB_CANDIDATE_LIMIT=2
+VISION_TEMP_STORE_BACKEND=r2
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET=
+R2_PRESIGNED_URL_SECONDS=300
+R2_OBJECT_PREFIX=vision-temp/
 
 DEBUG_TRACE_DIR=data/debug_traces
 DEBUG_TRACE_RETENTION_SECONDS=86400
 ```
 
-When enabled, visual understanding runs only after the bot has decided to reply. It summarizes current HTTP image, GIF, and video URLs for the main chat model. If a user replies to an image and asks the bot about it, the replied message's media is used before any recent-text fallback. Static images are downloaded once and reused as `data:` inputs for both visual summary and image/web search by default. Optional image/web search can add source or meme context before the pure visual description; if they conflict, the main model is told to prefer the search result. `VISION_MODEL_MODE=search_only` skips the pure visual-description call and uses only image/web search for source, character, and meme-background questions. `VISION_MODEL_SEARCH_INPUT=original_url` sends the original image URL directly to image/web search and avoids local download/encoding, but the URL must be reachable by the model provider. It does not replace the main roleplay model.
+When enabled, vision runs only after the bot has decided to reply. Static images are normalized in memory, analyzed by the visual model, searched through SerpApi Google Lens, and verified through bounded SerpApi Google Search queries. The complete vision stage shares `VISION_PIPELINE_TIMEOUT_SECONDS`; the main roleplay-model time is separate. Identity is confirmed only when deterministic evidence rules accept independent sources. Pure visual guesses, weak reposts, conflicting matches, cosplay/fan-art ambiguity, and ordinary private people remain uncertain. GIF and video inputs keep objective visual description but do not use reverse-image identity resolution in the first release.
 
-Debug traces are always written to `DEBUG_TRACE_DIR` as per-message JSONL files. They include incoming content, media URLs, media source, replied message id, vision/search outputs, final model prompt, model response, and final reply. API keys and Authorization headers are not written. Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned when new trace events are written.
+Create a private Cloudflare R2 bucket. Configure an object lifecycle rule that deletes the `vision-temp/` prefix after one day. Runtime objects use unpredictable keys and five-minute signed URLs; the bot deletes them immediately after Lens work completes, while the lifecycle rule covers crashes. Keep all R2 and SerpApi credentials only in `/opt/qq-rolebot/.env`.
+
+The pipeline first tries the original QQ media URL with Lens and uses R2 only when Google cannot fetch that URL. Triggered images are submitted to the visual provider, SerpApi/Google, and temporary R2 storage. Images from ignored group messages are not uploaded or searched.
+
+Debug traces are always written to `DEBUG_TRACE_DIR` as per-message JSONL files. They include stage durations, cache hits, result counts, resolver rule ids, final model prompt, model response, and final reply. Media URL query strings, image bytes, Base64, signed R2 URLs, API keys, and authorization headers are not written. Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned when new trace events are written.
 
 Voice:
 
@@ -390,24 +409,51 @@ Search only runs when the message is private, `@` the bot, or replies to the bot
 
 ## 9. Optional Vision Model
 
-Use an OpenAI-compatible vision model when the bot should understand images or meme-style image messages before the main model replies:
+Use an OpenAI-compatible visual model together with SerpApi and a private Cloudflare R2 bucket when the bot should understand images before the main model replies:
 
 ```dotenv
 VISION_MODEL_ENABLED=true
 VISION_MODEL_API_BASE=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 VISION_MODEL_API_KEY=
 VISION_MODEL_NAME=qwen3.7-plus
-VISION_MODEL_MODE=hybrid
-VISION_MODEL_SEARCH_INPUT=data_url
-VISION_MODEL_TIMEOUT_SECONDS=60
-VISION_MODEL_SEARCH_TIMEOUT_SECONDS=90
-VISION_MODEL_MAX_IMAGES=2
-VISION_MODEL_ENABLE_THINKING=true
-VISION_MODEL_ENABLE_SEARCH=true
+VISION_MODEL_TIMEOUT_SECONDS=8
+VISION_MODEL_ENABLE_THINKING=false
 VISION_MODEL_VIDEO_FPS=2
+VISION_PIPELINE_TIMEOUT_SECONDS=15
+VISION_PIPELINE_MAX_IMAGES=2
+VISION_PIPELINE_CACHE_TTL_SECONDS=86400
+VISION_PIPELINE_MAX_DOWNLOAD_BYTES=10485760
+VISION_PIPELINE_MAX_IMAGE_PIXELS=20000000
+VISION_CACHE_PATH=/opt/qq-rolebot/data/vision_cache.sqlite3
+SERPAPI_API_KEY=
+SERPAPI_LENS_ENABLED=true
+SERPAPI_SEARCH_ENABLED=true
+SERPAPI_TIMEOUT_SECONDS=8
+SERPAPI_LENS_EXACT_LIMIT=5
+SERPAPI_LENS_VISUAL_LIMIT=10
+SERPAPI_WEB_CANDIDATE_LIMIT=2
+VISION_TEMP_STORE_BACKEND=r2
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET=
+R2_PRESIGNED_URL_SECONDS=300
+R2_OBJECT_PREFIX=vision-temp/
 ```
 
-Keep the real API key only in `/opt/qq-rolebot/.env`. The bot sends only current-message or replied-message HTTP media after reply triggering. Messages in the same private chat or same group are handled sequentially, so text follow-ups wait for earlier image recognition in that chat while other chats can continue. Static images are downloaded in memory and reused as `data:` image inputs for visual summary and image/web search by default; the downloaded bytes are not persisted, and trace logs redact the base64 payload. Successful image summaries are saved as short-lived text context keyed by their `[image: ...]` or `[video: ...]` marker, so follow-up questions can reuse the latest summary and replies to a previously summarized image can reuse the matching summary without re-identifying it. OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` use `video_url`. With `VISION_MODEL_ENABLE_SEARCH=true`, image/web search may add a short source or meme-context summary before the pure visual description; if they conflict, the main model is told to prefer the search result. Set `VISION_MODEL_MODE=search_only` to skip pure visual description and use only image/web search. Set `VISION_MODEL_SEARCH_INPUT=original_url` to pass the original image URL directly to image/web search, avoiding local download and base64 encoding when the media URL is externally reachable. The final reply still comes from the main chat model.
+Keep real credentials only in `/opt/qq-rolebot/.env`. The bot sends only current-message or replied-message media after reply triggering. Static images are downloaded and normalized in memory; raw bytes are not persisted locally. Visual analysis, original-URL Lens search, and R2 publication run concurrently under one total deadline. If Google cannot fetch the QQ URL, Lens retries once through a short-lived R2 signed URL. The bot deletes the temporary object after the search and a one-day lifecycle rule for `vision-temp/` provides crash cleanup.
+
+Configure the R2 bucket as private. Do not use a public bucket URL. Set a lifecycle rule for prefix `vision-temp/` with deletion after one day. The signed URL lifetime defaults to five minutes.
+
+Only strong independent evidence can confirm a public figure or fictional character. Visual resemblance alone, one weak repost, conflicting results, cosplay/fan-art ambiguity, and private-person matches remain uncertain. The final roleplay reply still comes from the main chat model, which is explicitly instructed not to turn an uncertain candidate into a fact.
+
+Before production enablement, evaluate 20–50 non-private images covering characters, public figures, private people, screenshots, memes, cosplay, fan art, AI-generated art, low-resolution crops, and deliberately similar wrong characters. Require zero wrong confirmations in the initial set and P95 at or below `VISION_PIPELINE_TIMEOUT_SECONDS`.
+
+Summarize recent trace metrics without printing trace payloads:
+
+```bash
+/opt/miniconda3/envs/qq-rolebot/bin/python scripts/summarize_vision_traces.py data/debug_traces
+```
 
 ## 10. Optional TTS Backends
 

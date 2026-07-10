@@ -11,7 +11,7 @@ NapCatQQ + NoneBot2 的 QQ 日常聊天角色机器人。当前角色是《明�
 - 群里出现连续重复消息时，可自动跟着复读一条；默认两名用户连续发同一文本即触发，同群同文本触发后 10 分钟内不再重复跟读。
 - 记住最近若干条上下文，并在回复前感知当前上海时间，避免晚上说“刚练完晨功”这类错位回答。
 - 可查询当前时间，可在明确对机器人提问且出现搜索意图时调用 Tavily 搜索。
-- 可识别图片、语音、文件等 OneBot 消息段的摘要；启用视觉模型后，可在决定回复时为当前图片、表情包、动图或视频生成简短理解摘要，并可补充联网/图搜结果。
+- 可识别图片、语音、文件等 OneBot 消息段的摘要；启用视觉管线后，静态图片会结合视觉分析、Google Lens 相似图和网页证据进行保守身份判断，动图与视频只生成客观描述。
 - 无条件写入最近 24 小时调试 trace，包含视觉结果、搜索结果、最终 prompt 和模型回复，用于排查效果问题。
 - 可选 TTS 语音回复，支持 generic HTTP TTS、GPT-SoVITS、阿里云百炼 CosyVoice。
 - 通过 GitHub Actions 推送到 `master` 后自动测试并部署到 Linux 服务器。
@@ -26,7 +26,7 @@ QQ 小号
   -> ChatService
      -> SQLite context and group settings
      -> ToolRunner: time / Tavily search / persona source lookup
-     -> optional VisionClient: image / dynamic media / search context
+     -> optional VisionPipeline: visual model / SerpApi Lens + web / temporary R2 URL
      -> OpenAI-compatible chat model
      -> optional TTS voice rendering
 ```
@@ -106,16 +106,18 @@ NapCat's `mface` send path is for marketplace stickers. Local images can be regi
 custom faces, but active sends fall back to an `image` segment marked with NapCat custom-image
 `sub_type=1` unless a manifest item contains complete sendable `mface` metadata (`emoji_id`,
 `emoji_package_id`, `key`, and `summary`).
-- `VISION_MODEL_ENABLED`: whether to call a separate vision model after the bot has already decided to reply.
-- `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible vision model settings.
-- `VISION_MODEL_MODE`: visual understanding mode: `hybrid`, `search_only`, or `media_only`.
-- `VISION_MODEL_SEARCH_INPUT`: image input used for image/web search: `data_url` downloads images locally first; `original_url` sends the original image URL directly.
-- `VISION_MODEL_TIMEOUT_SECONDS`: timeout for each vision-model or image-fetch call; default is `60`.
-- `VISION_MODEL_SEARCH_TIMEOUT_SECONDS`: timeout for image/web search inside the vision model; default is `90`.
-- `VISION_MODEL_MAX_IMAGES`: maximum image URLs sent to the vision model per message.
-- `VISION_MODEL_ENABLE_THINKING`: whether to enable thinking for the vision model calls.
-- `VISION_MODEL_ENABLE_SEARCH`: whether to let the vision model call image/web search for image context.
+- `VISION_MODEL_ENABLED`: whether to run the evidence-driven vision pipeline after the reply policy has already allowed a response.
+- `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible visual-analysis model settings.
+- `VISION_MODEL_TIMEOUT_SECONDS`: component cap for visual-model calls; default is `8` seconds.
+- `VISION_MODEL_ENABLE_THINKING`: optional model-specific thinking switch; default is `false` so the shared budget remains available for verifiable search.
 - `VISION_MODEL_VIDEO_FPS`: sampling fps hint for dynamic media and video understanding.
+- `VISION_PIPELINE_TIMEOUT_SECONDS`: one total vision-stage deadline; default is `15` seconds and does not include the final roleplay-model response.
+- `VISION_PIPELINE_MAX_IMAGES`: maximum static images processed per message; default is `2`.
+- `VISION_PIPELINE_CACHE_TTL_SECONDS`: structured evidence cache lifetime; default is one day.
+- `VISION_PIPELINE_MAX_DOWNLOAD_BYTES`, `VISION_PIPELINE_MAX_IMAGE_PIXELS`: download and decoded-image safety limits.
+- `SERPAPI_API_KEY`, `SERPAPI_LENS_ENABLED`, `SERPAPI_SEARCH_ENABLED`: SerpApi Google Lens and Google Search settings.
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`: private Cloudflare R2 temporary-image store settings.
+- `R2_PRESIGNED_URL_SECONDS`: signed URL lifetime; default is `300` seconds.
 - `DEBUG_TRACE_DIR`: directory for per-message JSONL debug traces.
 - `DEBUG_TRACE_RETENTION_SECONDS`: debug trace retention; default is `86400` seconds.
 
@@ -193,16 +195,20 @@ Vision summary:
 - Messages in the same private chat or same group are handled sequentially, so a text follow-up waits for an earlier image recognition request in that chat to finish.
 - If a user replies to an image and asks the bot about it, the bot uses the replied message's media before falling back to recent text context.
 - Successful image summaries are saved as short-lived text context keyed by their `[image: ...]` or `[video: ...]` marker. Follow-up questions like `这谁` can reuse the latest summary, and replies to a previously summarized image reuse the matching summary without re-identifying it.
-- Downloads static images in memory, sends the same `data:` inputs to both visual summary and image/web search, and does not persist the downloaded image bytes.
-- Sends OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` as `video_url`.
-- When `VISION_MODEL_ENABLE_SEARCH=true`, adds a short image/web search summary before the pure visual description; if they conflict, the main model is told to prefer the search result.
-- `VISION_MODEL_MODE=search_only` skips the pure visual-description call and uses only image/web search, which is faster for source, character, and meme-background questions but has no visual fallback if search fails.
-- `VISION_MODEL_SEARCH_INPUT=original_url` avoids local image download/encoding for image search and is closest to web-style image URLs. Use it only when the upstream image URL is reachable by the model provider.
+- Downloads and normalizes static images in memory, hashes normalized bytes for cache lookup, and does not persist raw user images locally.
+- Runs visual analysis, Google Lens, and temporary R2 publication concurrently under one configurable deadline.
+- Tries the original QQ URL with Lens first. If Google cannot fetch it, the bot retries through a short-lived signed URL in a private R2 bucket.
+- Only confirms a public person or fictional character when independent evidence meets deterministic rules. Visual resemblance alone, one weak repost, conflicting results, cosplay, fan art, or private-person matches remain explicitly uncertain.
+- Sends OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` to the visual model for objective description only; the first release does not run Lens identity resolution for dynamic media.
+- Repeated images may reuse versioned structured evidence from `VISION_CACHE_PATH` without new provider calls.
 - The vision model does not write the final roleplay reply; DeepSeek/main chat model still produces the answer.
+- Triggered images are submitted to the configured visual provider, SerpApi/Google Lens, and private temporary object storage. Untriggered group images are not uploaded or searched.
 
 Debug traces:
 
 - Always enabled.
+- Media URL query strings, image bytes, Base64, R2 signed URLs, provider keys, and authorization headers are not written.
+- Summarize vision latency and decision metrics with `python scripts/summarize_vision_traces.py data/debug_traces`.
 - Written as per-message JSONL files under `DEBUG_TRACE_DIR`.
 - Include incoming message text/media URLs, media marker/source, replied message id, vision recognition result, image/web search result, saved/reused vision context, final model prompt, model response, and final cleaned reply.
 - Downloaded image `data:` payloads are redacted in traces; fetch events keep only source URL, media type, byte count, and timing.
