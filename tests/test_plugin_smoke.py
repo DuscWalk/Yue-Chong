@@ -451,6 +451,28 @@ def test_plugin_does_not_mark_reply_to_other_user_as_reply_to_bot(monkeypatch) -
     assert incoming.is_reply_to_bot is False
 
 
+def test_plugin_extracts_repeat_face_metadata(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    event = SimpleNamespace(
+        message_type="group",
+        group_id=20,
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy", card=""),
+        time=123,
+        to_me=False,
+        message=[SimpleNamespace(type="face", data={"id": "14"})],
+        get_plaintext=lambda: "",
+    )
+
+    incoming = module.build_incoming_message(event, bot_id=10001)
+
+    assert incoming is not None
+    assert incoming.repeat_media_kind == "face"
+    assert incoming.repeat_media_face_id == "14"
+    assert incoming.repeat_signature == "face:14"
+
+
 def test_roleplay_plugin_builds_tool_runner(monkeypatch) -> None:
     set_env(monkeypatch)
     monkeypatch.setenv("TAVILY_API_KEY", "test-key")

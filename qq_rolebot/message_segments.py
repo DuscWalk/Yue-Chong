@@ -27,6 +27,23 @@ class MediaUrls:
     markers: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class RepeatMedia:
+    kind: str = ""
+    file: str = ""
+    url: str = ""
+    face_id: str = ""
+
+    @property
+    def signature(self) -> str:
+        if self.kind == "face" and self.face_id:
+            return f"face:{self.face_id}"
+        if self.kind == "image":
+            value = self.file or self.url
+            return f"image:{value}" if value else ""
+        return ""
+
+
 def _data(segment: Any) -> dict[str, Any]:
     if isinstance(segment, dict):
         data = segment.get("data", {})
@@ -117,6 +134,24 @@ def extract_media_urls(message: Iterable[Any]) -> MediaUrls:
         elif segment_type == "image":
             image_urls.append(label)
     return MediaUrls(image_urls=image_urls, video_urls=video_urls, markers=markers)
+
+
+def extract_repeat_media(message: Iterable[Any]) -> RepeatMedia:
+    for segment in message:
+        if _segment_type(segment) != "face":
+            continue
+        face_id = _first_value(_data(segment), ("id",))
+        if face_id:
+            return RepeatMedia(kind="face", face_id=face_id)
+    for segment in message:
+        if _segment_type(segment) != "image":
+            continue
+        data = _data(segment)
+        file_value = _first_value(data, ("file",))
+        url_value = _first_value(data, ("url",))
+        if file_value or url_value:
+            return RepeatMedia(kind="image", file=file_value, url=url_value)
+    return RepeatMedia()
 
 
 def is_reply_to(message: Iterable[Any]) -> bool:

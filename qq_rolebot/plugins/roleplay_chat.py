@@ -13,6 +13,7 @@ from qq_rolebot.debug_trace import DebugTraceLogger
 from qq_rolebot.message_segments import (
     MediaUrls,
     extract_media_urls,
+    extract_repeat_media,
     extract_reply_message_id,
     is_reply_to,
     summarize_segments,
@@ -237,6 +238,7 @@ def build_incoming_message(
 
     message_segments = getattr(event, "message", [])
     media_urls = extract_media_urls(message_segments)
+    repeat_media = extract_repeat_media(message_segments)
     media_source = "current_message" if _has_media(media_urls) else ""
     reply_message_id = _reply_message_id(event)
     if not _has_media(media_urls):
@@ -262,6 +264,11 @@ def build_incoming_message(
             media_markers=media_urls.markers,
             media_source=media_source,
             reply_message_id=reply_message_id,
+            repeat_media_kind=repeat_media.kind,
+            repeat_media_file=repeat_media.file,
+            repeat_media_url=repeat_media.url,
+            repeat_media_face_id=repeat_media.face_id,
+            repeat_signature=repeat_media.signature,
         )
 
     if message_type == "group":
@@ -278,6 +285,11 @@ def build_incoming_message(
             media_markers=media_urls.markers,
             media_source=media_source,
             reply_message_id=reply_message_id,
+            repeat_media_kind=repeat_media.kind,
+            repeat_media_file=repeat_media.file,
+            repeat_media_url=repeat_media.url,
+            repeat_media_face_id=repeat_media.face_id,
+            repeat_signature=repeat_media.signature,
         )
 
     return None

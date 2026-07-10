@@ -28,6 +28,11 @@ class IncomingMessage:
     media_markers: list[str] = field(default_factory=list)
     media_source: str = ""
     reply_message_id: str = ""
+    repeat_media_kind: str = ""
+    repeat_media_file: str = ""
+    repeat_media_url: str = ""
+    repeat_media_face_id: str = ""
+    repeat_signature: str = ""
 
 
 @dataclass(frozen=True)

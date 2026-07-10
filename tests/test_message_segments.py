@@ -73,3 +73,24 @@ def test_extract_media_urls_keeps_media_markers() -> None:
     media = message_segments.extract_media_urls(message)
 
     assert media.markers == ["[image: quoted.png]", "[video: clip.mp4]"]
+
+
+def test_extract_repeat_media_prefers_face_id() -> None:
+    message = [segment("face", id="14")]
+
+    media = message_segments.extract_repeat_media(message)
+
+    assert media.kind == "face"
+    assert media.face_id == "14"
+    assert media.signature == "face:14"
+
+
+def test_extract_repeat_media_reads_image_file_or_url() -> None:
+    message = [segment("image", file="abc.image", url="https://example.test/a.jpg")]
+
+    media = message_segments.extract_repeat_media(message)
+
+    assert media.kind == "image"
+    assert media.file == "abc.image"
+    assert media.url == "https://example.test/a.jpg"
+    assert media.signature == "image:abc.image"
