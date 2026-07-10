@@ -50,7 +50,7 @@ restore_runtime_files() {
   fi
 
   local runtime_dir
-  for runtime_dir in data voice_refs voice_cache models; do
+  for runtime_dir in data voice_refs voice_cache models stickers; do
     if [[ -d "$backup_dir/$runtime_dir" && ! -d "$APP_DIR/$runtime_dir" ]]; then
       mv "$backup_dir/$runtime_dir" "$APP_DIR/$runtime_dir"
     fi
@@ -91,12 +91,12 @@ checkout_code() {
   if [[ -d "$APP_DIR/.git" ]]; then
     cd "$APP_DIR"
     git reset --hard
-    git clean -fd -e .env -e .watchdog.env -e data/ -e voice_refs/ -e voice_cache/ -e models/
+    git clean -fd -e .env -e .watchdog.env -e data/ -e voice_refs/ -e voice_cache/ -e models/ -e stickers/
     git remote set-url origin "$REPO_URL"
     git_network fetch --prune origin "$BRANCH"
     git checkout -B "$BRANCH" "origin/$BRANCH"
     git reset --hard "$TARGET_SHA"
-    git clean -fd -e .env -e .watchdog.env -e data/ -e voice_refs/ -e voice_cache/ -e models/
+    git clean -fd -e .env -e .watchdog.env -e data/ -e voice_refs/ -e voice_cache/ -e models/ -e stickers/
     return
   fi
 

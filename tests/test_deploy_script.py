@@ -39,6 +39,13 @@ def test_deploy_script_accepts_uploaded_source_archive() -> None:
     assert "for runtime_dir in data voice_refs voice_cache models" in script
 
 
+def test_deploy_script_preserves_stickers_directory() -> None:
+    script = Path("scripts/deploy_server.sh").read_text(encoding="utf-8")
+
+    assert "stickers" in script
+    assert "voice_cache models stickers" in script
+
+
 def test_deploy_script_preserves_watchdog_env() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
 

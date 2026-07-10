@@ -15,14 +15,18 @@ Expected paths:
 /opt/qq-rolebot/data/rolebot.sqlite3    group settings and recent context
 /opt/qq-rolebot/data/voice_cache        generated outgoing voice files
 /opt/qq-rolebot/data/voice_refs         authorized reference audio and transcripts
+/opt/qq-rolebot/stickers                persistent outgoing sticker assets and manifest
 /opt/miniconda3/envs/qq-rolebot         Python runtime
 /opt/cosyvoice                          optional local CosyVoice runtime
 /opt/gptsovits                          optional GPT-SoVITS runtime
 /opt/models                             optional local model weights
 ```
 
-CI/CD preserves `.env`, `.watchdog.env`, `data/`, `voice_refs`, `voice_cache`, and `models/` when
-replacing the app directory.
+CI/CD preserves `.env`, `.watchdog.env`, `data/`, `voice_refs`, `voice_cache`, `models/`, and
+`stickers/` when replacing the app directory.
+
+Store production sticker images and `manifest.yaml` under `/opt/qq-rolebot/stickers`. The deploy
+script preserves this directory. Do not commit real sticker packs or generated media to git.
 
 ## 1. Base System Setup
 

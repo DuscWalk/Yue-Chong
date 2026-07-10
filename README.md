@@ -89,6 +89,10 @@ Required basics:
 - `REPEAT_REPLY_ENABLED`: whether the bot joins consecutive repeated group messages.
 - `REPEAT_REPLY_THRESHOLD`: how many consecutive matching messages trigger repeat reply. Minimum is `2`; the same text in the same group is then cooled down for 10 minutes.
 - `CONTEXT_WINDOW_SECONDS`: maximum age of messages included in model context; default is `600`.
+- `MEDIA_REPLY_ENABLED`: whether successful model text replies may append a persistent sticker image.
+- `MEDIA_REPLY_PROBABILITY`: `0` to `100`; chance to append a sticker after model text.
+- `MEDIA_STICKER_ROOT`: persistent sticker asset directory. Production default should be `/opt/qq-rolebot/stickers`.
+- `MEDIA_STICKER_MANIFEST`: optional manifest path; defaults to `MEDIA_STICKER_ROOT/manifest.yaml`.
 - `VISION_MODEL_ENABLED`: whether to call a separate vision model after the bot has already decided to reply.
 - `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible vision model settings.
 - `VISION_MODEL_MODE`: visual understanding mode: `hybrid`, `search_only`, or `media_only`.
