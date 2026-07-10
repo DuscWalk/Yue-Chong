@@ -78,6 +78,8 @@ class Settings:
     media_reply_probability: int
     media_sticker_root: Path
     media_sticker_manifest: Path
+    media_register_custom_faces: bool
+    media_custom_face_cache: Path
     repeat_reply_enabled: bool
     repeat_reply_threshold: int
     context_window_seconds: int
@@ -262,6 +264,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         media_reply_probability=media_reply_probability,
         media_sticker_root=media_sticker_root,
         media_sticker_manifest=media_sticker_manifest,
+        media_register_custom_faces=_bool(env, "MEDIA_REGISTER_CUSTOM_FACES", True),
+        media_custom_face_cache=Path(
+            env.get("MEDIA_CUSTOM_FACE_CACHE", "data/custom_faces.json").strip()
+            or "data/custom_faces.json"
+        ),
         repeat_reply_enabled=_bool(env, "REPEAT_REPLY_ENABLED", True),
         repeat_reply_threshold=repeat_reply_threshold,
         context_window_seconds=context_window_seconds,

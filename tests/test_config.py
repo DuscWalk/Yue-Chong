@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from qq_rolebot.config import ConfigError, load_settings, parse_int_set, parse_str_list
 
@@ -154,6 +155,17 @@ def test_load_settings_reads_media_overrides() -> None:
     assert settings.media_reply_probability == 35
     assert settings.media_sticker_root.as_posix() == "/opt/qq-rolebot/stickers"
     assert settings.media_sticker_manifest.as_posix() == "/opt/qq-rolebot/stickers/custom.yaml"
+
+
+def test_load_settings_parses_custom_face_registration_settings() -> None:
+    env = complete_env()
+    env["MEDIA_REGISTER_CUSTOM_FACES"] = "true"
+    env["MEDIA_CUSTOM_FACE_CACHE"] = "data/custom_faces.json"
+
+    settings = load_settings(env)
+
+    assert settings.media_register_custom_faces is True
+    assert settings.media_custom_face_cache == Path("data/custom_faces.json")
 
 
 def test_load_settings_rejects_invalid_media_probability() -> None:

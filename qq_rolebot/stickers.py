@@ -50,6 +50,9 @@ class StickerLibrary:
             cursor -= item.weight
         return items[-1]
 
+    def items(self) -> list[StickerItem]:
+        return list(self._load_items())
+
     def _matching_items(self, tags: list[str]) -> list[StickerItem]:
         wanted = {tag.strip().lower() for tag in tags if tag.strip()}
         items = self._load_items()
