@@ -14,7 +14,9 @@ The pipeline must keep production chat safety predictable:
   remote QQ/NapCat media.
 - Active images and stickers come only from a server-persistent asset library. Image files in that
   active library should be registered to the bot QQ account as custom stickers before being used for
-  active sticker sends.
+  active sticker sends. Registration makes the assets available in the account's custom sticker
+  collection, but NapCat's `mface` send path is for marketplace stickers and may not be able to send
+  registered local custom stickers as `mface`.
 
 The current repository state is tagged as `v1.0`; this work is the next iteration.
 
@@ -66,8 +68,10 @@ Use a controlled agent pipeline with these boundaries:
 4. `ReplyEnhancer`
    - Runs after model text is accepted by guardrails.
    - Optionally appends active image or sticker messages from the persistent server asset library.
-   - Prefers registered QQ custom sticker output when NapCat exposes enough metadata, and falls back
-     to ordinary image output when registration or custom sticker rendering is unavailable.
+   - Registers active image assets as QQ custom stickers when possible.
+   - Prefers `mface` output only when the selected asset has real marketplace sticker metadata, and
+     falls back to ordinary image output for locally registered custom stickers when NapCat exposes
+     no sendable `mface` key.
    - Never creates a reply by itself; active media is attached only to a model-approved text reply.
 
 5. `OutgoingReply`
@@ -110,8 +114,8 @@ class OutgoingReply:
 Rules:
 
 - A normal model reply returns one text message.
-- An active sticker reply returns two messages: text first, custom sticker second when available,
-  otherwise image second.
+- An active sticker reply returns two messages: text first, `mface` second only when sendable
+  marketplace metadata is available, otherwise image second.
 - A text repeat returns one text message.
 - An image repeat returns one image message using the temporary media reference.
 - A face repeat returns one face message using the QQ face id.
@@ -176,10 +180,12 @@ Custom sticker registration:
   NapCat `/add_custom_face` for each file that has not already been registered by file hash.
 - After registration, call NapCat custom face detail/list APIs to build a local registry from
   library item id or file hash to custom sticker metadata.
-- Registered metadata must include enough fields to send a NapCat `mface` message segment:
-  `emoji_id`, `emoji_package_id`, `key`, and `summary`.
-- If NapCat returns no matching metadata after registration, keep the item usable as ordinary
-  image output and mark the registry entry as pending or image-only.
+- Registered local custom sticker metadata may include `md5`, `resId`, `url`, `emoId`, and `epId`,
+  but does not necessarily include the `key` required for NapCat `mface` sends.
+- If NapCat returns no matching metadata after registration, keep the item usable as ordinary image
+  output and mark the registry entry as pending or image-only.
+- Only assets with complete marketplace sticker metadata (`emoji_id`, `emoji_package_id`, `key`,
+  and `summary`) should be rendered as `mface`.
 - Registry data belongs under the server data directory, not in git.
 
 Selection behavior:
@@ -189,8 +195,9 @@ Selection behavior:
 - The model must not choose arbitrary file paths.
 - Later iterations can let the model suggest a semantic tag, but code still maps tags to known
   manifest entries.
-- Active sends should prefer the selected item's registered custom sticker metadata. If rendering
-  the custom sticker fails, the plugin may fall back to the selected image file.
+- Active sends should prefer the selected item's sendable `mface` metadata when present. If the item
+  is only registered as a local custom sticker, or if `mface` rendering fails, the plugin falls back
+  to the selected image file.
 
 ## Temporary Repeat Media
 
@@ -251,8 +258,9 @@ Group addressed or triggered message:
 5. Controlled tools build context for time, search, persona sources, and vision when applicable.
 6. `AgentRunner` builds messages and calls the chat model.
 7. Guardrails clean the model text.
-8. `ReplyEnhancer` optionally appends a persistent registered custom sticker, falling back to a
-   persistent image file when custom sticker metadata is unavailable.
+8. `ReplyEnhancer` optionally appends a persistent active sticker. It uses `mface` only for
+   sendable marketplace metadata and otherwise sends the registered local asset as a persistent
+   image file.
 9. Service stores text representation of successful bot outputs for context.
 10. Plugin renders ordered messages as separate sends.
 
@@ -284,7 +292,8 @@ Unit tests:
 - `RepeatPolicy` returns text, image, face, and custom sticker `OutgoingReply` objects under
   existing threshold, multi-user, group enabled, and cooldown rules.
 - Active media append only happens after a successful model text reply.
-- Active media append prefers custom sticker output when registered metadata exists.
+- Active media append registers local image assets as account custom stickers, but sends `mface`
+  only when sendable marketplace metadata exists.
 - Active media append never creates a standalone reply when trigger policy or guardrails suppress
   text.
 
