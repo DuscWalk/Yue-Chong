@@ -182,6 +182,43 @@ def test_plugin_extracts_dynamic_media_into_incoming_message(monkeypatch) -> Non
     ]
 
 
+def test_plugin_builds_incoming_message_with_mface_repeat_metadata(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    event = SimpleNamespace(
+        message_type="group",
+        group_id=20,
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy", card=""),
+        time=123,
+        to_me=False,
+        message=[
+            SimpleNamespace(
+                type="image",
+                data={
+                    "file": "ab-123.gif",
+                    "url": "https://example.test/ab-123.gif",
+                    "emoji_id": "123",
+                    "emoji_package_id": 456,
+                    "key": "send-key",
+                    "summary": "[商城表情]",
+                },
+            )
+        ],
+        get_plaintext=lambda: "",
+    )
+
+    incoming = module.build_incoming_message(event, bot_id=10001)
+
+    assert incoming is not None
+    assert incoming.repeat_media_kind == "mface"
+    assert incoming.repeat_signature == "mface:456:123:send-key"
+    assert incoming.repeat_media_emoji_id == "123"
+    assert incoming.repeat_media_emoji_package_id == "456"
+    assert incoming.repeat_media_key == "send-key"
+    assert incoming.repeat_media_summary == "[商城表情]"
+
+
 def test_plugin_uses_replied_message_image_urls(monkeypatch) -> None:
     set_env(monkeypatch)
     module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")

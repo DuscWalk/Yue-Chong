@@ -12,6 +12,10 @@ def msg(
     media_file: str = "",
     media_url: str = "",
     face_id: str = "",
+    emoji_id: str = "",
+    emoji_package_id: str = "",
+    key: str = "",
+    summary: str = "",
 ) -> IncomingMessage:
     return IncomingMessage(
         group_id=20,
@@ -25,6 +29,10 @@ def msg(
         repeat_media_file=media_file,
         repeat_media_url=media_url,
         repeat_media_face_id=face_id,
+        repeat_media_emoji_id=emoji_id,
+        repeat_media_emoji_package_id=emoji_package_id,
+        repeat_media_key=key,
+        repeat_media_summary=summary,
     )
 
 
@@ -96,6 +104,31 @@ def test_repeat_tracker_repeats_face() -> None:
     assert reply is not None
     assert reply.messages[0].kind == "face"
     assert reply.messages[0].face_id == "14"
+
+
+def test_repeat_tracker_repeats_mface() -> None:
+    tracker = RepeatTracker(threshold=2)
+    kwargs = {
+        "repeat_signature": "mface:456:123:send-key",
+        "media_kind": "mface",
+        "emoji_id": "123",
+        "emoji_package_id": "456",
+        "key": "send-key",
+        "summary": "[测试表情]",
+    }
+
+    tracker.record_and_match(msg("[测试表情]", sender=1, created_at=100, **kwargs), now=100)
+    reply = tracker.record_and_match(
+        msg("[测试表情]", sender=2, created_at=101, **kwargs),
+        now=101,
+    )
+
+    assert reply is not None
+    assert reply.messages[0].kind == "mface"
+    assert reply.messages[0].emoji_id == "123"
+    assert reply.messages[0].emoji_package_id == "456"
+    assert reply.messages[0].key == "send-key"
+    assert reply.messages[0].summary == "[测试表情]"
 
 
 def test_repeat_tracker_cools_down_same_signature() -> None:

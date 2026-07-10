@@ -280,6 +280,10 @@ def build_incoming_message(
             repeat_media_file=repeat_media.file,
             repeat_media_url=repeat_media.url,
             repeat_media_face_id=repeat_media.face_id,
+            repeat_media_emoji_id=repeat_media.emoji_id,
+            repeat_media_emoji_package_id=repeat_media.emoji_package_id,
+            repeat_media_key=repeat_media.key,
+            repeat_media_summary=repeat_media.summary,
             repeat_signature=repeat_media.signature,
         )
 
@@ -301,6 +305,10 @@ def build_incoming_message(
             repeat_media_file=repeat_media.file,
             repeat_media_url=repeat_media.url,
             repeat_media_face_id=repeat_media.face_id,
+            repeat_media_emoji_id=repeat_media.emoji_id,
+            repeat_media_emoji_package_id=repeat_media.emoji_package_id,
+            repeat_media_key=repeat_media.key,
+            repeat_media_summary=repeat_media.summary,
             repeat_signature=repeat_media.signature,
         )
 

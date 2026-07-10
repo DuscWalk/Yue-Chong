@@ -32,6 +32,10 @@ class IncomingMessage:
     repeat_media_file: str = ""
     repeat_media_url: str = ""
     repeat_media_face_id: str = ""
+    repeat_media_emoji_id: str = ""
+    repeat_media_emoji_package_id: str = ""
+    repeat_media_key: str = ""
+    repeat_media_summary: str = ""
     repeat_signature: str = ""
 
 

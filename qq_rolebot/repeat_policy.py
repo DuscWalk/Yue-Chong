@@ -18,6 +18,10 @@ class RepeatEntry:
     media_file: str = ""
     media_url: str = ""
     media_face_id: str = ""
+    media_emoji_id: str = ""
+    media_emoji_package_id: str = ""
+    media_key: str = ""
+    media_summary: str = ""
 
 
 class RepeatTracker:
@@ -72,6 +76,10 @@ class RepeatTracker:
             media_file=message.repeat_media_file,
             media_url=message.repeat_media_url,
             media_face_id=message.repeat_media_face_id,
+            media_emoji_id=message.repeat_media_emoji_id,
+            media_emoji_package_id=message.repeat_media_emoji_package_id,
+            media_key=message.repeat_media_key,
+            media_summary=message.repeat_media_summary,
         )
 
     @staticmethod
@@ -95,6 +103,27 @@ class RepeatTracker:
                     OutgoingMessage(kind="face", face_id=entry.media_face_id, source="repeat")
                 ],
             )
+        if entry.media_kind == "mface":
+            if entry.media_emoji_id and entry.media_emoji_package_id and entry.media_key:
+                return OutgoingReply(
+                    source="repeat",
+                    messages=[
+                        OutgoingMessage(
+                            kind="mface",
+                            emoji_id=entry.media_emoji_id,
+                            emoji_package_id=entry.media_emoji_package_id,
+                            key=entry.media_key,
+                            summary=entry.media_summary or "[商城表情]",
+                            source="repeat",
+                        )
+                    ],
+                )
+            value = entry.media_file or entry.media_url
+            if value:
+                return OutgoingReply(
+                    source="repeat",
+                    messages=[OutgoingMessage(kind="image", file=value, source="repeat")],
+                )
         if entry.text:
             return OutgoingReply.text(entry.text, source="repeat")
         return None
