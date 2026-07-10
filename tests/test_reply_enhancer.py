@@ -38,3 +38,34 @@ def test_reply_enhancer_never_creates_standalone_reply(tmp_path: Path) -> None:
     reply = enhancer.enhance(OutgoingReply(source="model", messages=[]), random_value=0)
 
     assert reply.messages == []
+
+
+def test_reply_enhancer_prefers_sendable_mface(tmp_path: Path) -> None:
+    root = tmp_path / "stickers"
+    root.mkdir()
+    (root / "market.webp").write_bytes(b"image")
+    manifest = root / "manifest.yaml"
+    manifest.write_text(
+        """
+items:
+  - id: market
+    file: market.webp
+    type: mface
+    emoji_id: "123"
+    emoji_package_id: "456"
+    key: send-key
+    summary: "[测试表情]"
+    tags: [reply]
+""".strip(),
+        encoding="utf-8",
+    )
+    enhancer = ReplyEnhancer(
+        enabled=True,
+        probability=100,
+        library=StickerLibrary(root=root, manifest_path=manifest),
+    )
+
+    reply = enhancer.enhance(OutgoingReply.text("一切安好。", source="model"), random_value=0)
+
+    assert [message.kind for message in reply.messages] == ["text", "mface"]
+    assert reply.messages[1].emoji_id == "123"

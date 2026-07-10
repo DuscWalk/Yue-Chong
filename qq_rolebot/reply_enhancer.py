@@ -26,6 +26,18 @@ class ReplyEnhancer:
         item = self.library.select(tags=["reply"], random_value=random_value)
         if item is None:
             return reply
+        if item.is_sendable_mface:
+            return reply.with_message(
+                OutgoingMessage(
+                    kind="mface",
+                    emoji_id=item.emoji_id,
+                    emoji_package_id=item.emoji_package_id,
+                    key=item.key,
+                    summary=item.summary,
+                    file=str(item.path),
+                    source="sticker",
+                )
+            )
         return reply.with_message(
             OutgoingMessage(kind="image", file=str(item.path), source="sticker")
         )

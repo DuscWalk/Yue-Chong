@@ -13,6 +13,21 @@ class StickerItem:
     path: Path
     tags: tuple[str, ...]
     weight: int = 1
+    media_type: str = "image"
+    emoji_id: str = ""
+    emoji_package_id: str = ""
+    key: str = ""
+    summary: str = ""
+
+    @property
+    def is_sendable_mface(self) -> bool:
+        return (
+            self.media_type == "mface"
+            and bool(self.emoji_id.strip())
+            and bool(self.emoji_package_id.strip())
+            and bool(self.key.strip())
+            and bool(self.summary.strip())
+        )
 
 
 class StickerLibrary:
@@ -72,8 +87,19 @@ class StickerLibrary:
             return None
         raw_tags = raw_item.get("tags", [])
         tags = tuple(str(tag).strip().lower() for tag in raw_tags if str(tag).strip())
+        media_type = str(raw_item.get("type", "image") or "image").strip().lower()
         try:
             weight = int(raw_item.get("weight", 1))
         except (TypeError, ValueError):
             weight = 1
-        return StickerItem(id=item_id, path=path, tags=tags, weight=max(1, weight))
+        return StickerItem(
+            id=item_id,
+            path=path,
+            tags=tags,
+            weight=max(1, weight),
+            media_type=media_type,
+            emoji_id=str(raw_item.get("emoji_id", "") or "").strip(),
+            emoji_package_id=str(raw_item.get("emoji_package_id", "") or "").strip(),
+            key=str(raw_item.get("key", "") or "").strip(),
+            summary=str(raw_item.get("summary", "") or "").strip(),
+        )
