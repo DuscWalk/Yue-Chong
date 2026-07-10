@@ -5,13 +5,15 @@ import time
 from typing import Protocol
 
 from qq_rolebot.admin import handle_admin_command, is_admin_command
+from qq_rolebot.agent_runner import AgentRunner
 from qq_rolebot.config import Settings
 from qq_rolebot.debug_trace import DebugTrace, DebugTraceLogger
 from qq_rolebot.guardrails import clean_response
 from qq_rolebot.model_client import ModelResult
+from qq_rolebot.outgoing import OutgoingReply
 from qq_rolebot.persona import load_persona
 from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter, decide_trigger
-from qq_rolebot.prompting import build_chat_messages
+from qq_rolebot.repeat_policy import RepeatTracker
 from qq_rolebot.storage import MessageRecord, Storage, VisionContextRecord
 
 REPEAT_REPLY_COOLDOWN_SECONDS = 600
@@ -79,7 +81,13 @@ class ChatService:
         self.followup_tracker = followup_tracker
         self.vision_client = vision_client
         self.trace_logger = trace_logger
-        self._repeat_reply_cooldowns: dict[tuple[int, str], int] = {}
+        self.agent_runner = AgentRunner(settings=settings, model=model)
+        self.repeat_tracker = RepeatTracker(
+            threshold=settings.repeat_reply_threshold,
+            cooldown_seconds=REPEAT_REPLY_COOLDOWN_SECONDS,
+            window_seconds=settings.context_window_seconds,
+        )
+        self.reply_enhancer = None
         self.persona = load_persona(settings.persona_path)
 
     def _switch_persona(self, variant: str) -> str:
@@ -103,9 +111,18 @@ class ChatService:
         )
 
     async def handle(self, message: IncomingMessage, *, random_value: int) -> str | None:
+        reply = await self.handle_reply(message, random_value=random_value)
+        return reply.text if reply is not None else None
+
+    async def handle_reply(
+        self,
+        message: IncomingMessage,
+        *,
+        random_value: int,
+    ) -> OutgoingReply | None:
         trace = self._start_trace(message)
         if message.is_private:
-            return await self._handle_private(message, trace=trace)
+            return await self._handle_private_reply(message, trace=trace, random_value=random_value)
 
         if message.group_id not in self.settings.group_whitelist:
             self._trace(trace, "message.ignored", {"reason": "group not whitelisted"})
@@ -136,7 +153,7 @@ class ChatService:
                     created_at=message.created_at,
                 )
                 self._trace(trace, "reply.final", {"reply": reply, "source": "admin"})
-                return reply
+                return OutgoingReply.text(reply, source="admin")
             reply = await handle_admin_command(
                 message.text,
                 sender_id=message.user_id,
@@ -151,18 +168,30 @@ class ChatService:
                 created_at=message.created_at,
             )
             self._trace(trace, "reply.final", {"reply": reply, "source": "admin"})
-            return reply
+            return OutgoingReply.text(reply, source="admin")
 
         group = await self.storage.get_group_settings(message.group_id)
-        repeat_reply = await self._repeat_reply(message, muted_until=group.muted_until)
-        if repeat_reply is not None and group.enabled:
-            await self._save_bot_reply(
-                group_id=message.group_id,
-                reply=repeat_reply,
-                created_at=message.created_at,
-            )
-            self._trace(trace, "reply.final", {"reply": repeat_reply, "source": "repeat"})
-            return repeat_reply
+        if self.settings.repeat_reply_enabled and group.enabled:
+            if group.muted_until <= message.created_at and not (
+                message.is_at_bot or message.is_reply_to_bot
+            ):
+                repeat_reply = self.repeat_tracker.record_and_match(
+                    message,
+                    now=message.created_at,
+                )
+                if repeat_reply is not None:
+                    repeat_text = repeat_reply.text or message.text
+                    await self._save_bot_reply(
+                        group_id=message.group_id,
+                        reply=repeat_text,
+                        created_at=message.created_at,
+                    )
+                    self._trace(
+                        trace,
+                        "reply.final",
+                        {"reply": repeat_text, "source": "repeat"},
+                    )
+                    return repeat_reply
 
         followup_matched = False
         if self.followup_tracker is not None:
@@ -221,7 +250,7 @@ class ChatService:
                         created_at=message.created_at,
                     )
                 self._trace(trace, "reply.final", {"reply": reply, "source": "tool"})
-                return reply
+                return OutgoingReply.text(reply, source="tool") if reply is not None else None
             tool_context = str(getattr(tool_result, "context", "") or "")
             self._trace(trace, "tool.result", {"direct_reply": None, "context": tool_context})
 
@@ -230,32 +259,28 @@ class ChatService:
             await self._vision_context(message, context_id=message.group_id, trace=trace),
         )
         context = await self.storage.recent_messages(message.group_id, now=message.created_at)
-        messages = build_chat_messages(self.persona, context, message, tool_context=tool_context)
-        self._trace(trace, "model.prompt", {"messages": messages})
-        started = time.monotonic()
-        result = await self.model.chat(messages)
+        agent_result = await self.agent_runner.run(
+            persona=self.persona,
+            context=context,
+            message=message,
+            tool_context=tool_context,
+        )
+        self._trace(trace, "model.prompt", {"messages": agent_result.messages or []})
         self._trace(
             trace,
             "model.response",
             {
-                "ok": result.ok,
-                "text": result.text,
-                "error": result.error,
-                "elapsed_ms": self._elapsed_ms(started),
+                "ok": agent_result.ok,
+                "text": agent_result.model_text,
+                "error": agent_result.error,
+                "elapsed_ms": agent_result.elapsed_ms,
             },
         )
-        if not result.ok:
+        if not agent_result.ok:
             self._trace(trace, "reply.final", {"reply": None, "source": "model_error"})
             return None
 
-        reply = clean_response(
-            result.text,
-            max_chars=self.settings.max_output_chars,
-            sensitive_words=self.settings.sensitive_words,
-        )
-        if reply is None:
-            self._trace(trace, "reply.final", {"reply": None, "source": "guardrails"})
-            return None
+        reply = agent_result.text
 
         await self._save_bot_reply(
             group_id=message.group_id,
@@ -263,7 +288,7 @@ class ChatService:
             created_at=message.created_at,
         )
         self._trace(trace, "reply.final", {"reply": reply, "source": "model"})
-        return reply
+        return OutgoingReply.text(reply, source="model")
 
     async def _vision_context(
         self,
@@ -451,6 +476,16 @@ class ChatService:
         *,
         trace: DebugTrace | None,
     ) -> str | None:
+        reply = await self._handle_private_reply(message, trace=trace, random_value=100)
+        return reply.text if reply is not None else None
+
+    async def _handle_private_reply(
+        self,
+        message: IncomingMessage,
+        *,
+        trace: DebugTrace | None,
+        random_value: int,
+    ) -> OutgoingReply | None:
         context_id = -abs(message.user_id)
         await self.storage.save_message(
             MessageRecord(
@@ -486,7 +521,7 @@ class ChatService:
                         created_at=message.created_at,
                     )
                 self._trace(trace, "reply.final", {"reply": reply, "source": "tool"})
-                return reply
+                return OutgoingReply.text(reply, source="tool") if reply is not None else None
             tool_context = str(getattr(tool_result, "context", "") or "")
             self._trace(trace, "tool.result", {"direct_reply": None, "context": tool_context})
 
@@ -495,36 +530,32 @@ class ChatService:
             await self._vision_context(message, context_id=context_id, trace=trace),
         )
         context = await self.storage.recent_messages(context_id, now=message.created_at)
-        messages = build_chat_messages(self.persona, context, message, tool_context=tool_context)
-        self._trace(trace, "model.prompt", {"messages": messages})
-        started = time.monotonic()
-        result = await self.model.chat(messages)
+        agent_result = await self.agent_runner.run(
+            persona=self.persona,
+            context=context,
+            message=message,
+            tool_context=tool_context,
+        )
+        self._trace(trace, "model.prompt", {"messages": agent_result.messages or []})
         self._trace(
             trace,
             "model.response",
             {
-                "ok": result.ok,
-                "text": result.text,
-                "error": result.error,
-                "elapsed_ms": self._elapsed_ms(started),
+                "ok": agent_result.ok,
+                "text": agent_result.model_text,
+                "error": agent_result.error,
+                "elapsed_ms": agent_result.elapsed_ms,
             },
         )
-        if not result.ok:
+        if not agent_result.ok:
             self._trace(trace, "reply.final", {"reply": None, "source": "model_error"})
             return None
 
-        reply = clean_response(
-            result.text,
-            max_chars=self.settings.max_output_chars,
-            sensitive_words=self.settings.sensitive_words,
-        )
-        if reply is None:
-            self._trace(trace, "reply.final", {"reply": None, "source": "guardrails"})
-            return None
+        reply = agent_result.text
 
         await self._save_bot_reply(group_id=context_id, reply=reply, created_at=message.created_at)
         self._trace(trace, "reply.final", {"reply": reply, "source": "model"})
-        return reply
+        return OutgoingReply.text(reply, source="model")
 
     def _start_trace(self, message: IncomingMessage) -> DebugTrace | None:
         if self.trace_logger is None:

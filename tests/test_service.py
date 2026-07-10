@@ -435,6 +435,52 @@ async def test_service_repeat_reply_requires_multiple_users(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_service_handle_reply_repeats_image_without_model(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    model = CountingModel()
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=model,
+        rate_limiter=RateLimiter(),
+    )
+
+    first = IncomingMessage(
+        group_id=20,
+        user_id=11,
+        nickname="Amy",
+        text="[image: a.jpg]",
+        is_at_bot=False,
+        created_at=100,
+        repeat_media_kind="image",
+        repeat_media_file="a.jpg",
+        repeat_signature="image:a.jpg",
+    )
+    second = IncomingMessage(
+        group_id=20,
+        user_id=12,
+        nickname="Bob",
+        text="[image: a.jpg]",
+        is_at_bot=False,
+        created_at=101,
+        repeat_media_kind="image",
+        repeat_media_file="a.jpg",
+        repeat_signature="image:a.jpg",
+    )
+
+    assert await service.handle_reply(first, random_value=99) is None
+    reply = await service.handle_reply(second, random_value=99)
+
+    assert reply is not None
+    assert reply.messages[0].kind == "image"
+    assert reply.messages[0].file == "a.jpg"
+    assert model.calls == 0
+
+
+@pytest.mark.asyncio
 async def test_service_ignores_non_whitelisted_group(tmp_path: Path) -> None:
     settings = load_settings(env(tmp_path))
     storage = Storage(settings.database_path)

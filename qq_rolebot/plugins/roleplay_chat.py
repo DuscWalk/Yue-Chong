@@ -325,6 +325,17 @@ async def send_outgoing_reply(bot: Bot, event: MessageEvent, reply: OutgoingRepl
             await bot.send(event, segment)
 
 
+async def _service_handle_reply(
+    incoming: IncomingMessage,
+    *,
+    random_value: int,
+) -> OutgoingReply | None:
+    if hasattr(service, "handle_reply"):
+        return await service.handle_reply(incoming, random_value=random_value)
+    reply = await service.handle(incoming, random_value=random_value)
+    return OutgoingReply.text(reply, source="legacy") if reply else None
+
+
 @matcher.handle()
 async def handle_message(bot: Bot, event: MessageEvent) -> None:
     async with _conversation_locks[conversation_scope(event)]:
@@ -345,11 +356,11 @@ async def _handle_message_locked(bot: Bot, event: MessageEvent) -> None:
     if incoming is None:
         return
 
-    reply = await service.handle(incoming, random_value=random.randrange(100))
-    if reply:
+    outgoing_reply = await _service_handle_reply(incoming, random_value=random.randrange(100))
+    if outgoing_reply is not None and not outgoing_reply.is_empty:
         if voice_service is not None:
-            voice = await voice_service.maybe_render(incoming, reply=reply)
+            voice = await voice_service.maybe_render(incoming, reply=outgoing_reply.text)
             if voice.file_path is not None:
                 await bot.send(event, MessageSegment.record(str(voice.file_path)))
                 return
-        await bot.send(event, MessageSegment.text(reply))
+        await send_outgoing_reply(bot, event, outgoing_reply)
