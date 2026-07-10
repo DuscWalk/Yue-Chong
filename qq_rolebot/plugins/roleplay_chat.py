@@ -57,6 +57,8 @@ def vision_settings_complete(candidate_settings) -> bool:
             candidate_settings.r2_access_key_id,
             candidate_settings.r2_secret_access_key,
             candidate_settings.r2_bucket,
+            candidate_settings.serpapi_lens_enabled,
+            candidate_settings.serpapi_search_enabled,
         )
     )
 

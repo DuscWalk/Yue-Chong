@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from qq_rolebot.debug_trace import DebugTrace
+from qq_rolebot.vision_client import VisualAnalysis
 from qq_rolebot.vision_types import (
     ConfidenceBand,
     LensEvidence,
@@ -117,19 +118,18 @@ class VisionPipeline:
             await asyncio.gather(*image_tasks, return_exceptions=True)
             if dynamic_task is not None:
                 await asyncio.gather(dynamic_task, return_exceptions=True)
-            completed = [
-                task.result()
-                for task in image_tasks
-                if task.done() and not task.cancelled() and task.exception() is None
-            ]
-            resolutions = tuple(completed)
-            while len(resolutions) < len(selected_images):
-                resolutions += (
-                    VisionResolution.uncertain(
-                        observation=VisionObservation(),
-                        reason="识图总预算已用尽",
-                    ),
-                )
+            ordered: list[VisionResolution] = []
+            for task in image_tasks:
+                if task.done() and not task.cancelled() and task.exception() is None:
+                    ordered.append(task.result())
+                else:
+                    ordered.append(
+                        VisionResolution.uncertain(
+                            observation=VisionObservation(),
+                            reason="识图总预算已用尽",
+                        )
+                    )
+            resolutions = tuple(ordered)
         except Exception as exc:
             for task in image_tasks:
                 task.cancel()
@@ -207,43 +207,94 @@ class VisionPipeline:
                 trace.event("vision.cache.hit", {"stage": "resolution"})
             return cached
 
-        visual_task = asyncio.create_task(
-            self.analyzer.analyze_image(
-                image,
-                user_question=user_question,
-                chat_context=chat_context,
-                trace=trace,
-                timeout_seconds=self._remaining(deadline),
-            )
+        cached_observation, cached_lens = await asyncio.gather(
+            self.cache.get_observation(
+                image.sha256,
+                version=self.cache_version,
+                now=self.now(),
+            ),
+            self.cache.get_lens(
+                image.sha256,
+                version=self.cache_version,
+                now=self.now(),
+            ),
         )
-        publish_task = asyncio.create_task(self.temp_store.publish(image, trace=trace))
-        lens_task = asyncio.create_task(
-            self.lens_client.search(
-                url,
-                trace=trace,
-                timeout_seconds=self._remaining(deadline),
+        visual_task = (
+            asyncio.create_task(
+                self.analyzer.analyze_image(
+                    image,
+                    user_question=user_question,
+                    chat_context=chat_context,
+                    trace=trace,
+                    timeout_seconds=self._remaining(deadline),
+                )
             )
+            if cached_observation is None
+            else None
+        )
+        publish_task = (
+            asyncio.create_task(self.temp_store.publish(image, trace=trace))
+            if cached_lens is None
+            else None
+        )
+        lens_task = (
+            asyncio.create_task(
+                self.lens_client.search(
+                    url,
+                    trace=trace,
+                    timeout_seconds=self._remaining(deadline),
+                )
+            )
+            if cached_lens is None
+            else None
         )
         handle = None
         publication_detached = False
         try:
-            visual, lens_result = await asyncio.gather(visual_task, lens_task)
-            if lens_result.ok:
-                lens = lens_result.evidence
-                self._schedule_publication_cleanup(publish_task)
-                publication_detached = True
-            elif lens_result.unreachable and self._remaining(deadline) > 0:
-                handle = await publish_task
-                retry = await self.lens_client.search(
-                    handle.url,
-                    trace=trace,
-                    timeout_seconds=self._remaining(deadline),
-                )
-                lens = retry.evidence if retry.ok else LensEvidence()
+            if visual_task is not None:
+                visual = await visual_task
+                if not visual.error:
+                    await self.cache.put_observation(
+                        image.sha256,
+                        version=self.cache_version,
+                        observation=visual.observation,
+                        now=self.now(),
+                    )
             else:
-                lens = LensEvidence()
-                self._schedule_publication_cleanup(publish_task)
-                publication_detached = True
+                visual = VisualAnalysis(observation=cached_observation or VisionObservation())
+
+            if lens_task is None:
+                lens = cached_lens or LensEvidence()
+            else:
+                lens_result = await lens_task
+                if lens_result.ok:
+                    lens = lens_result.evidence
+                    if publish_task is not None:
+                        self._schedule_publication_cleanup(publish_task)
+                        publication_detached = True
+                elif lens_result.unreachable and self._remaining(deadline) > 0:
+                    if publish_task is None:
+                        lens = LensEvidence()
+                    else:
+                        handle = await publish_task
+                        retry = await self.lens_client.search(
+                            handle.url,
+                            trace=trace,
+                            timeout_seconds=self._remaining(deadline),
+                        )
+                        lens = retry.evidence if retry.ok else LensEvidence()
+                else:
+                    lens = LensEvidence()
+                    if publish_task is not None:
+                        self._schedule_publication_cleanup(publish_task)
+                        publication_detached = True
+                if lens.exact_matches or lens.visual_matches:
+                    await self.cache.put_lens(
+                        image.sha256,
+                        version=self.cache_version,
+                        lens=lens,
+                        now=self.now(),
+                    )
 
             lens_candidates = await self.analyzer.extract_search_candidates(
                 lens,
@@ -298,7 +349,7 @@ class VisionPipeline:
             raise
         except Exception as exc:
             observation = VisionObservation()
-            if visual_task.done() and not visual_task.cancelled():
+            if visual_task is not None and visual_task.done() and not visual_task.cancelled():
                 try:
                     observation = visual_task.result().observation
                 except Exception:
@@ -309,7 +360,8 @@ class VisionPipeline:
             )
         finally:
             if (
-                not publication_detached
+                publish_task is not None
+                and not publication_detached
                 and handle is None
                 and publish_task.done()
                 and not publish_task.cancelled()
@@ -318,15 +370,22 @@ class VisionPipeline:
                     handle = publish_task.result()
                 except Exception:
                     handle = None
-            if not publication_detached and not publish_task.done():
+            if (
+                publish_task is not None
+                and not publication_detached
+                and not publish_task.done()
+            ):
                 publish_task.cancel()
                 await asyncio.gather(publish_task, return_exceptions=True)
             if handle is not None:
                 self._schedule_cleanup(handle)
             for task in (visual_task, lens_task):
-                if not task.done():
+                if task is not None and not task.done():
                     task.cancel()
-            await asyncio.gather(visual_task, lens_task, return_exceptions=True)
+            await asyncio.gather(
+                *(task for task in (visual_task, lens_task) if task is not None),
+                return_exceptions=True,
+            )
 
     def _schedule_cleanup(self, handle: Any) -> None:
         task = asyncio.create_task(self._delete_handle(handle))

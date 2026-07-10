@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import time
 from typing import Protocol
+from urllib.parse import urlsplit, urlunsplit
 
 from qq_rolebot.admin import handle_admin_command, is_admin_command
 from qq_rolebot.agent_runner import AgentRunner
@@ -603,8 +604,8 @@ class ChatService:
                 "is_at_bot": message.is_at_bot,
                 "is_reply_to_bot": message.is_reply_to_bot,
                 "created_at": message.created_at,
-                "image_urls": message.image_urls,
-                "video_urls": message.video_urls,
+                "image_urls": [self._redact_media_url(url) for url in message.image_urls],
+                "video_urls": [self._redact_media_url(url) for url in message.video_urls],
                 "media_markers": message.media_markers,
                 "media_source": message.media_source,
                 "reply_message_id": message.reply_message_id,
@@ -615,6 +616,11 @@ class ChatService:
     def _trace(trace: DebugTrace | None, name: str, data: dict) -> None:
         if trace is not None:
             trace.event(name, data)
+
+    @staticmethod
+    def _redact_media_url(url: str) -> str:
+        parts = urlsplit(url)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
     @staticmethod
     def _elapsed_ms(started: float) -> int:

@@ -45,6 +45,17 @@ class FakePreprocessor:
         return normalized(url)
 
 
+class PerUrlPreprocessor(FakePreprocessor):
+    def __init__(self, delays: dict[str, float]) -> None:
+        super().__init__()
+        self.delays = delays
+
+    async def fetch(self, url, *, trace=None, timeout_seconds=None):
+        self.urls.append(url)
+        await asyncio.sleep(self.delays.get(url, 0))
+        return normalized(url)
+
+
 class FakeAnalyzer:
     def __init__(self, delay: float = 0, *, fail: bool = False) -> None:
         self.delay = delay
@@ -168,9 +179,19 @@ class FakeStore:
 
 
 class FakeCache:
-    def __init__(self, cached: VisionResolution | None = None) -> None:
+    def __init__(
+        self,
+        cached: VisionResolution | None = None,
+        *,
+        cached_observation: VisionObservation | None = None,
+        cached_lens: LensEvidence | None = None,
+    ) -> None:
         self.cached = cached
+        self.cached_observation = cached_observation
+        self.cached_lens = cached_lens
         self.put_resolutions = 0
+        self.put_observations = 0
+        self.put_lens_results = 0
 
     async def get_resolution(self, image_hash, *, version, now):
         return self.cached
@@ -180,16 +201,18 @@ class FakeCache:
         self.put_resolutions += 1
 
     async def get_observation(self, image_hash, *, version, now):
-        return None
+        return self.cached_observation
 
     async def put_observation(self, image_hash, *, version, observation, now):
-        return None
+        self.cached_observation = observation
+        self.put_observations += 1
 
     async def get_lens(self, image_hash, *, version, now):
-        return None
+        return self.cached_lens
 
     async def put_lens(self, image_hash, *, version, lens, now):
-        return None
+        self.cached_lens = lens
+        self.put_lens_results += 1
 
 
 class ConfirmingResolver:
@@ -351,6 +374,48 @@ async def test_pipeline_complete_cache_hit_skips_providers() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pipeline_reuses_partial_observation_and_lens_cache() -> None:
+    cached_observation = VisionObservation(
+        scene_description="缓存中的银发动画角色。",
+        distinctive_features=("银发",),
+    )
+    cache = FakeCache(cached_observation=cached_observation, cached_lens=lens_success().evidence)
+    analyzer = FakeAnalyzer()
+    lens = FakeLens([lens_success()])
+    store = FakeStore()
+    pipeline = make_pipeline(analyzer=analyzer, lens=lens, store=store, cache=cache)
+
+    result = await pipeline.describe(
+        ["https://qq.test/a.png"],
+        user_question="这是谁？",
+        chat_context="",
+    )
+    await pipeline.close()
+
+    assert result.ok is True
+    assert analyzer.image_calls == 0
+    assert lens.urls == []
+    assert store.calls == 0
+    assert cache.put_resolutions == 1
+
+
+@pytest.mark.asyncio
+async def test_pipeline_writes_observation_and_lens_stage_cache() -> None:
+    cache = FakeCache()
+    pipeline = make_pipeline(cache=cache)
+
+    await pipeline.describe(
+        ["https://qq.test/a.png"],
+        user_question="这是谁？",
+        chat_context="",
+    )
+    await pipeline.close()
+
+    assert cache.put_observations == 1
+    assert cache.put_lens_results == 1
+
+
+@pytest.mark.asyncio
 async def test_pipeline_hard_deadline_returns_safe_result() -> None:
     pipeline = make_pipeline(analyzer=FakeAnalyzer(delay=1), timeout=0.05)
 
@@ -366,6 +431,28 @@ async def test_pipeline_hard_deadline_returns_safe_result() -> None:
     assert elapsed < 0.2
     assert result.timed_out is True
     assert result.resolutions[0].confidence is not ConfidenceBand.CONFIRMED
+
+
+@pytest.mark.asyncio
+async def test_pipeline_timeout_preserves_multi_image_positions() -> None:
+    pipeline = make_pipeline(timeout=0.05)
+    pipeline.preprocessor = PerUrlPreprocessor(
+        {
+            "https://qq.test/slow.png": 1,
+            "https://qq.test/fast.png": 0,
+        }
+    )
+
+    result = await pipeline.describe(
+        ["https://qq.test/slow.png", "https://qq.test/fast.png"],
+        user_question="分别是谁？",
+        chat_context="",
+    )
+    await pipeline.close()
+
+    assert result.timed_out is True
+    assert result.resolutions[0].confidence is ConfidenceBand.UNCERTAIN
+    assert result.resolutions[1].confidence is ConfidenceBand.CONFIRMED
 
 
 @pytest.mark.asyncio

@@ -851,6 +851,35 @@ async def test_service_traces_private_prompt_model_response_and_reply(tmp_path: 
 
 
 @pytest.mark.asyncio
+async def test_service_trace_redacts_media_url_query_parameters(tmp_path: Path) -> None:
+    settings = load_settings(env(tmp_path))
+    storage = Storage(settings.database_path)
+    await storage.init()
+    trace_logger = DebugTraceLogger(root_dir=tmp_path / "traces", now=lambda: 200_000)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=CapturingModel(),
+        rate_limiter=RateLimiter(),
+        vision_client=FakeVisionClient(summary="无法可靠确认。"),
+        trace_logger=trace_logger,
+    )
+
+    await service.handle(
+        private_msg(
+            "这是谁",
+            image_urls=["https://qq.test/image?token=private&file=secret"],
+        ),
+        random_value=99,
+    )
+
+    raw = trace_text(tmp_path / "traces")
+    assert "https://qq.test/image" in raw
+    assert "token=private" not in raw
+    assert "file=secret" not in raw
+
+
+@pytest.mark.asyncio
 async def test_service_passes_video_urls_to_vision_client_after_trigger(tmp_path: Path) -> None:
     settings = load_settings(env(tmp_path))
     storage = Storage(settings.database_path)

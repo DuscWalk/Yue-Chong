@@ -57,6 +57,8 @@ def test_plugin_requires_complete_vision_provider_settings(monkeypatch) -> None:
     assert module.vision_settings_complete(complete) is True
     assert module.vision_settings_complete(replace(complete, serpapi_api_key="")) is False
     assert module.vision_settings_complete(replace(complete, r2_bucket="")) is False
+    assert module.vision_settings_complete(replace(complete, serpapi_lens_enabled=False)) is False
+    assert module.vision_settings_complete(replace(complete, serpapi_search_enabled=False)) is False
 
 
 def test_render_outgoing_message_renders_mface(monkeypatch) -> None:

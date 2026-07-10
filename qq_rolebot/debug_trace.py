@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -8,6 +9,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+HTTP_URL_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
 
 
 @dataclass(frozen=True)
@@ -51,7 +55,7 @@ class DebugTraceLogger:
             "ts": datetime.fromtimestamp(self.now(), UTC).isoformat(),
             "trace_id": trace.trace_id,
             "event": name,
-            "data": data,
+            "data": self._redact_urls(data),
         }
         with trace.path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(event, ensure_ascii=False, default=str))
@@ -67,3 +71,26 @@ class DebugTraceLogger:
                     path.unlink()
             except FileNotFoundError:
                 continue
+
+    @classmethod
+    def _redact_urls(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: cls._redact_urls(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._redact_urls(item) for item in value]
+        if isinstance(value, tuple):
+            return [cls._redact_urls(item) for item in value]
+        if isinstance(value, str):
+            return HTTP_URL_PATTERN.sub(cls._redact_url_match, value)
+        return value
+
+    @staticmethod
+    def _redact_url_match(match: re.Match[str]) -> str:
+        url = match.group(0)
+        trailing = ""
+        while url and url[-1] in ").,;!?]}，。；！？）】":
+            trailing = url[-1] + trailing
+            url = url[:-1]
+        parts = urlsplit(url)
+        redacted = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+        return redacted + trailing

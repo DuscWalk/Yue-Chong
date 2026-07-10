@@ -39,3 +39,21 @@ def test_debug_trace_logger_writes_full_events_and_prunes_old_files(tmp_path: Pa
     assert events[1]["event"] == "model.prompt"
     assert events[1]["data"]["messages"][0]["content"] == "完整 prompt"
     assert events[1]["trace_id"] == events[0]["trace_id"]
+
+
+def test_debug_trace_logger_redacts_url_query_strings_in_nested_text(tmp_path: Path) -> None:
+    logger = DebugTraceLogger(root_dir=tmp_path, now=lambda: 200_000)
+
+    trace = logger.start_trace(
+        {
+            "text": "看看 https://qq.test/image?token=private&file=secret#fragment",
+            "nested": [{"url": "https://signed.test/object?sig=secret"}],
+        }
+    )
+
+    raw = trace.path.read_text(encoding="utf-8")
+    assert "https://qq.test/image" in raw
+    assert "https://signed.test/object" in raw
+    assert "token=private" not in raw
+    assert "file=secret" not in raw
+    assert "sig=secret" not in raw
