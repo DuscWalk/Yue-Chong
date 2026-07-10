@@ -39,5 +39,11 @@ class ReplyEnhancer:
                 )
             )
         return reply.with_message(
-            OutgoingMessage(kind="image", file=str(item.path), source="sticker")
+            OutgoingMessage(
+                kind="image",
+                file=str(item.path),
+                image_sub_type=1,
+                summary=item.summary or "[动画表情]",
+                source="sticker",
+            )
         )

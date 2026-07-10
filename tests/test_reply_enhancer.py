@@ -30,6 +30,8 @@ def test_reply_enhancer_appends_sticker_after_text(tmp_path: Path) -> None:
 
     assert [message.kind for message in reply.messages] == ["text", "image"]
     assert reply.messages[1].source == "sticker"
+    assert reply.messages[1].image_sub_type == 1
+    assert reply.messages[1].summary == "[动画表情]"
 
 
 def test_reply_enhancer_never_creates_standalone_reply(tmp_path: Path) -> None:

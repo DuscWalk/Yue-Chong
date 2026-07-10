@@ -100,8 +100,9 @@ Required basics:
   `data/` and out of git.
 
 NapCat's `mface` send path is for marketplace stickers. Local images can be registered as QQ
-custom faces, but active sends fall back to ordinary image output unless a manifest item contains
-complete sendable `mface` metadata (`emoji_id`, `emoji_package_id`, `key`, and `summary`).
+custom faces, but active sends fall back to an `image` segment marked with NapCat custom-image
+`sub_type=1` unless a manifest item contains complete sendable `mface` metadata (`emoji_id`,
+`emoji_package_id`, `key`, and `summary`).
 - `VISION_MODEL_ENABLED`: whether to call a separate vision model after the bot has already decided to reply.
 - `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible vision model settings.
 - `VISION_MODEL_MODE`: visual understanding mode: `hybrid`, `search_only`, or `media_only`.

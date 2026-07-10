@@ -31,7 +31,8 @@ script preserves this directory. Do not commit real sticker packs or generated m
 When `MEDIA_REGISTER_CUSTOM_FACES=true`, the bot registers manifest image assets through NapCat
 `/add_custom_face` and records file hashes in `/opt/qq-rolebot/data/custom_faces.json`.
 NapCat `mface` sending is marketplace-sticker-specific, so locally registered custom faces may still
-be sent as ordinary images unless the manifest item includes complete sendable `mface` metadata.
+be sent as `image` segments marked with custom-image `sub_type=1` unless the manifest item includes
+complete sendable `mface` metadata.
 
 ## 1. Base System Setup
 
@@ -126,8 +127,9 @@ MEDIA_CUSTOM_FACE_CACHE=/opt/qq-rolebot/data/custom_faces.json
 
 Active media only appends after a successful model text reply. `MEDIA_REGISTER_CUSTOM_FACES=true`
 registers active image assets to the bot QQ account as custom faces. Locally registered custom faces
-do not necessarily have the `key` needed for NapCat `mface` sends; use ordinary image fallback or
-provide marketplace `mface` metadata in the manifest for true `mface` output.
+do not necessarily have the `key` needed for NapCat `mface` sends; the bot sends them as custom
+image subtype fallback, or you can provide marketplace `mface` metadata in the manifest for true
+`mface` output.
 
 Tools:
 

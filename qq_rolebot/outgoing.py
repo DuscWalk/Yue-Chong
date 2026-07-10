@@ -17,6 +17,7 @@ class OutgoingMessage:
     emoji_package_id: str = ""
     key: str = ""
     summary: str = ""
+    image_sub_type: int | None = None
     source: str = ""
 
     @property

@@ -70,8 +70,8 @@ Use a controlled agent pipeline with these boundaries:
    - Optionally appends active image or sticker messages from the persistent server asset library.
    - Registers active image assets as QQ custom stickers when possible.
    - Prefers `mface` output only when the selected asset has real marketplace sticker metadata, and
-     falls back to ordinary image output for locally registered custom stickers when NapCat exposes
-     no sendable `mface` key.
+     falls back to an `image` segment marked with NapCat custom-image `sub_type=1` for locally
+     registered custom stickers when NapCat exposes no sendable `mface` key.
    - Never creates a reply by itself; active media is attached only to a model-approved text reply.
 
 5. `OutgoingReply`
@@ -182,8 +182,8 @@ Custom sticker registration:
   library item id or file hash to custom sticker metadata.
 - Registered local custom sticker metadata may include `md5`, `resId`, `url`, `emoId`, and `epId`,
   but does not necessarily include the `key` required for NapCat `mface` sends.
-- If NapCat returns no matching metadata after registration, keep the item usable as ordinary image
-  output and mark the registry entry as pending or image-only.
+- If NapCat returns no matching metadata after registration, keep the item usable as custom-image
+  subtype output and mark the registry entry as pending or image-only.
 - Only assets with complete marketplace sticker metadata (`emoji_id`, `emoji_package_id`, `key`,
   and `summary`) should be rendered as `mface`.
 - Registry data belongs under the server data directory, not in git.
@@ -197,7 +197,7 @@ Selection behavior:
   manifest entries.
 - Active sends should prefer the selected item's sendable `mface` metadata when present. If the item
   is only registered as a local custom sticker, or if `mface` rendering fails, the plugin falls back
-  to the selected image file.
+  to the selected image file with custom-image `sub_type=1` and a sticker summary.
 
 ## Temporary Repeat Media
 
@@ -278,7 +278,7 @@ Private message:
 - If the text send succeeds but image send fails, do not retract or add a new apology message.
 - If image or custom sticker repeat rendering fails, do not persist the failed temporary reference.
 - If custom sticker registration fails at startup, log the item id and reason, continue with
-  image fallback, and retry on the next registration pass.
+  custom-image subtype fallback, and retry on the next registration pass.
 - Debug traces may record sticker ids, tags, relative paths, custom sticker ids, and registration
   status, but must not include secrets or login URLs.
 
@@ -288,12 +288,13 @@ Unit tests:
 
 - Config parses media settings and rejects invalid probabilities.
 - Sticker library loads a manifest, ignores missing files, and selects weighted assets.
-- Sticker registration maps manifest items to custom sticker metadata and preserves image fallback.
+- Sticker registration maps manifest items to custom sticker metadata and preserves custom-image
+  subtype fallback.
 - `RepeatPolicy` returns text, image, face, and custom sticker `OutgoingReply` objects under
   existing threshold, multi-user, group enabled, and cooldown rules.
 - Active media append only happens after a successful model text reply.
 - Active media append registers local image assets as account custom stickers, but sends `mface`
-  only when sendable marketplace metadata exists.
+  only when sendable marketplace metadata exists; otherwise it sends image with `sub_type=1`.
 - Active media append never creates a standalone reply when trigger policy or guardrails suppress
   text.
 
@@ -302,7 +303,8 @@ Plugin tests:
 - Renderer sends text and image as separate `bot.send(...)` calls in order.
 - Renderer sends temporary repeat image with `MessageSegment.image(...)`.
 - Renderer sends QQ face repeat with `MessageSegment.face(...)`.
-- Renderer sends custom sticker repeat and registered active stickers with a raw `mface` segment.
+- Renderer sends marketplace custom sticker repeat with a raw `mface` segment and registered active
+  image fallback with `image` `sub_type=1`.
 - Existing TTS fallback behavior remains covered.
 
 Docs and deployment tests:

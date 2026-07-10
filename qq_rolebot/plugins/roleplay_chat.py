@@ -367,7 +367,16 @@ def render_outgoing_message(message: OutgoingMessage) -> MessageSegment | None:
         return MessageSegment.text(message.text.strip())
     if message.kind == "image":
         value = message.file.strip() or message.url.strip()
-        return MessageSegment.image(value) if value else None
+        if not value:
+            return None
+        if message.image_sub_type is not None or message.summary.strip():
+            data: dict[str, object] = {"file": value}
+            if message.image_sub_type is not None:
+                data["sub_type"] = message.image_sub_type
+            if message.summary.strip():
+                data["summary"] = message.summary.strip()
+            return MessageSegment("image", data)
+        return MessageSegment.image(value)
     if message.kind == "face" and message.face_id.strip():
         return MessageSegment.face(int(message.face_id))
     if message.kind == "mface" and not message.is_empty:

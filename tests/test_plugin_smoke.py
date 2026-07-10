@@ -64,6 +64,29 @@ def test_render_outgoing_message_renders_mface(monkeypatch) -> None:
     }
 
 
+def test_render_outgoing_message_renders_custom_image_metadata(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+
+    segment = module.render_outgoing_message(
+        module.OutgoingMessage(
+            kind="image",
+            file="/opt/qq-rolebot/stickers/calm.webp",
+            image_sub_type=1,
+            summary="[动画表情]",
+            source="sticker",
+        )
+    )
+
+    assert segment is not None
+    assert segment.type == "image"
+    assert segment.data == {
+        "file": "/opt/qq-rolebot/stickers/calm.webp",
+        "sub_type": 1,
+        "summary": "[动画表情]",
+    }
+
+
 def test_plugin_builds_private_incoming_message(monkeypatch) -> None:
     set_env(monkeypatch)
     module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
