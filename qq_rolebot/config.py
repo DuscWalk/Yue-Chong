@@ -116,14 +116,29 @@ class Settings:
     vision_model_api_base: str
     vision_model_api_key: str
     vision_model_name: str
-    vision_model_mode: str
-    vision_model_search_input: str
-    vision_model_timeout_seconds: int
-    vision_model_search_timeout_seconds: int
-    vision_model_max_images: int
+    vision_model_timeout_seconds: float
     vision_model_enable_thinking: bool
-    vision_model_enable_search: bool
     vision_model_video_fps: float
+    vision_pipeline_timeout_seconds: float
+    vision_pipeline_max_images: int
+    vision_pipeline_cache_ttl_seconds: int
+    vision_pipeline_max_download_bytes: int
+    vision_pipeline_max_image_pixels: int
+    serpapi_api_key: str
+    serpapi_lens_enabled: bool
+    serpapi_search_enabled: bool
+    serpapi_timeout_seconds: float
+    serpapi_lens_exact_limit: int
+    serpapi_lens_visual_limit: int
+    serpapi_web_candidate_limit: int
+    vision_temp_store_backend: str
+    r2_account_id: str
+    r2_access_key_id: str
+    r2_secret_access_key: str
+    r2_bucket: str
+    r2_presigned_url_seconds: int
+    r2_object_prefix: str
+    vision_cache_path: Path
     debug_trace_dir: Path
     debug_trace_retention_seconds: int
     followup_window_seconds: int
@@ -182,17 +197,55 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if tts_timeout_seconds < 1:
         raise ConfigError("TTS_TIMEOUT_SECONDS must be greater than 0")
 
-    vision_model_timeout_seconds = _int(env, "VISION_MODEL_TIMEOUT_SECONDS", 60)
-    if vision_model_timeout_seconds < 1:
+    vision_model_timeout_seconds = _float(env, "VISION_MODEL_TIMEOUT_SECONDS", 8.0)
+    if vision_model_timeout_seconds <= 0:
         raise ConfigError("VISION_MODEL_TIMEOUT_SECONDS must be greater than 0")
 
-    vision_model_search_timeout_seconds = _int(env, "VISION_MODEL_SEARCH_TIMEOUT_SECONDS", 90)
-    if vision_model_search_timeout_seconds < 1:
-        raise ConfigError("VISION_MODEL_SEARCH_TIMEOUT_SECONDS must be greater than 0")
+    vision_pipeline_timeout_seconds = _float(env, "VISION_PIPELINE_TIMEOUT_SECONDS", 15.0)
+    if vision_pipeline_timeout_seconds <= 0:
+        raise ConfigError("VISION_PIPELINE_TIMEOUT_SECONDS must be greater than 0")
 
-    vision_model_max_images = _int(env, "VISION_MODEL_MAX_IMAGES", 2)
-    if vision_model_max_images < 1:
-        raise ConfigError("VISION_MODEL_MAX_IMAGES must be greater than 0")
+    vision_pipeline_max_images = _int(env, "VISION_PIPELINE_MAX_IMAGES", 2)
+    if vision_pipeline_max_images < 1:
+        raise ConfigError("VISION_PIPELINE_MAX_IMAGES must be greater than 0")
+
+    vision_pipeline_cache_ttl_seconds = _int(
+        env, "VISION_PIPELINE_CACHE_TTL_SECONDS", 86_400
+    )
+    if vision_pipeline_cache_ttl_seconds < 1:
+        raise ConfigError("VISION_PIPELINE_CACHE_TTL_SECONDS must be greater than 0")
+
+    vision_pipeline_max_download_bytes = _int(
+        env, "VISION_PIPELINE_MAX_DOWNLOAD_BYTES", 10_485_760
+    )
+    if vision_pipeline_max_download_bytes < 1:
+        raise ConfigError("VISION_PIPELINE_MAX_DOWNLOAD_BYTES must be greater than 0")
+
+    vision_pipeline_max_image_pixels = _int(
+        env, "VISION_PIPELINE_MAX_IMAGE_PIXELS", 20_000_000
+    )
+    if vision_pipeline_max_image_pixels < 1:
+        raise ConfigError("VISION_PIPELINE_MAX_IMAGE_PIXELS must be greater than 0")
+
+    serpapi_timeout_seconds = _float(env, "SERPAPI_TIMEOUT_SECONDS", 8.0)
+    if serpapi_timeout_seconds <= 0:
+        raise ConfigError("SERPAPI_TIMEOUT_SECONDS must be greater than 0")
+
+    serpapi_lens_exact_limit = _int(env, "SERPAPI_LENS_EXACT_LIMIT", 5)
+    if serpapi_lens_exact_limit < 1:
+        raise ConfigError("SERPAPI_LENS_EXACT_LIMIT must be greater than 0")
+
+    serpapi_lens_visual_limit = _int(env, "SERPAPI_LENS_VISUAL_LIMIT", 10)
+    if serpapi_lens_visual_limit < 1:
+        raise ConfigError("SERPAPI_LENS_VISUAL_LIMIT must be greater than 0")
+
+    serpapi_web_candidate_limit = _int(env, "SERPAPI_WEB_CANDIDATE_LIMIT", 2)
+    if serpapi_web_candidate_limit < 1:
+        raise ConfigError("SERPAPI_WEB_CANDIDATE_LIMIT must be greater than 0")
+
+    r2_presigned_url_seconds = _int(env, "R2_PRESIGNED_URL_SECONDS", 300)
+    if r2_presigned_url_seconds < 1:
+        raise ConfigError("R2_PRESIGNED_URL_SECONDS must be greater than 0")
 
     vision_model_video_fps = _float(env, "VISION_MODEL_VIDEO_FPS", 2.0)
     if vision_model_video_fps <= 0 or vision_model_video_fps > 10:
@@ -222,15 +275,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if tts_audio_format not in {"wav", "mp3"}:
         raise ConfigError("TTS_AUDIO_FORMAT must be one of: wav, mp3")
 
-    vision_model_mode = env.get("VISION_MODEL_MODE", "hybrid").strip().lower() or "hybrid"
-    if vision_model_mode not in {"hybrid", "search_only", "media_only"}:
-        raise ConfigError("VISION_MODEL_MODE must be one of: hybrid, search_only, media_only")
-
-    vision_model_search_input = (
-        env.get("VISION_MODEL_SEARCH_INPUT", "data_url").strip().lower() or "data_url"
+    vision_temp_store_backend = (
+        env.get("VISION_TEMP_STORE_BACKEND", "r2").strip().lower() or "r2"
     )
-    if vision_model_search_input not in {"data_url", "original_url"}:
-        raise ConfigError("VISION_MODEL_SEARCH_INPUT must be one of: data_url, original_url")
+    if vision_temp_store_backend != "r2":
+        raise ConfigError("VISION_TEMP_STORE_BACKEND must be: r2")
 
     raw_tts_ref_audio_path = env.get("TTS_REF_AUDIO_PATH", "").strip()
     persona_variant = env.get("PERSONA_VARIANT", "dialect").strip().lower() or "dialect"
@@ -317,14 +366,30 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         vision_model_api_key=env.get("VISION_MODEL_API_KEY", "").strip(),
         vision_model_name=env.get("VISION_MODEL_NAME", "qwen3.6-plus").strip()
         or "qwen3.6-plus",
-        vision_model_mode=vision_model_mode,
-        vision_model_search_input=vision_model_search_input,
         vision_model_timeout_seconds=vision_model_timeout_seconds,
-        vision_model_search_timeout_seconds=vision_model_search_timeout_seconds,
-        vision_model_max_images=vision_model_max_images,
-        vision_model_enable_thinking=_bool(env, "VISION_MODEL_ENABLE_THINKING", True),
-        vision_model_enable_search=_bool(env, "VISION_MODEL_ENABLE_SEARCH", True),
+        vision_model_enable_thinking=_bool(env, "VISION_MODEL_ENABLE_THINKING", False),
         vision_model_video_fps=vision_model_video_fps,
+        vision_pipeline_timeout_seconds=vision_pipeline_timeout_seconds,
+        vision_pipeline_max_images=vision_pipeline_max_images,
+        vision_pipeline_cache_ttl_seconds=vision_pipeline_cache_ttl_seconds,
+        vision_pipeline_max_download_bytes=vision_pipeline_max_download_bytes,
+        vision_pipeline_max_image_pixels=vision_pipeline_max_image_pixels,
+        serpapi_api_key=env.get("SERPAPI_API_KEY", "").strip(),
+        serpapi_lens_enabled=_bool(env, "SERPAPI_LENS_ENABLED", True),
+        serpapi_search_enabled=_bool(env, "SERPAPI_SEARCH_ENABLED", True),
+        serpapi_timeout_seconds=serpapi_timeout_seconds,
+        serpapi_lens_exact_limit=serpapi_lens_exact_limit,
+        serpapi_lens_visual_limit=serpapi_lens_visual_limit,
+        serpapi_web_candidate_limit=serpapi_web_candidate_limit,
+        vision_temp_store_backend=vision_temp_store_backend,
+        r2_account_id=env.get("R2_ACCOUNT_ID", "").strip(),
+        r2_access_key_id=env.get("R2_ACCESS_KEY_ID", "").strip(),
+        r2_secret_access_key=env.get("R2_SECRET_ACCESS_KEY", "").strip(),
+        r2_bucket=env.get("R2_BUCKET", "").strip(),
+        r2_presigned_url_seconds=r2_presigned_url_seconds,
+        r2_object_prefix=env.get("R2_OBJECT_PREFIX", "vision-temp/").strip()
+        or "vision-temp/",
+        vision_cache_path=Path(env.get("VISION_CACHE_PATH", "data/vision_cache.sqlite3")),
         debug_trace_dir=Path(env.get("DEBUG_TRACE_DIR", "data/debug_traces")),
         debug_trace_retention_seconds=debug_trace_retention_seconds,
         followup_window_seconds=followup_window_seconds,

@@ -216,14 +216,29 @@ def test_load_settings_reads_tts_defaults() -> None:
     assert settings.vision_model_api_base == ""
     assert settings.vision_model_api_key == ""
     assert settings.vision_model_name == "qwen3.6-plus"
-    assert settings.vision_model_mode == "hybrid"
-    assert settings.vision_model_search_input == "data_url"
-    assert settings.vision_model_timeout_seconds == 60
-    assert settings.vision_model_search_timeout_seconds == 90
-    assert settings.vision_model_max_images == 2
-    assert settings.vision_model_enable_thinking is True
-    assert settings.vision_model_enable_search is True
+    assert settings.vision_model_timeout_seconds == 8.0
+    assert settings.vision_model_enable_thinking is False
     assert settings.vision_model_video_fps == 2.0
+    assert settings.vision_pipeline_timeout_seconds == 15.0
+    assert settings.vision_pipeline_max_images == 2
+    assert settings.vision_pipeline_cache_ttl_seconds == 86_400
+    assert settings.vision_pipeline_max_download_bytes == 10_485_760
+    assert settings.vision_pipeline_max_image_pixels == 20_000_000
+    assert settings.serpapi_api_key == ""
+    assert settings.serpapi_lens_enabled is True
+    assert settings.serpapi_search_enabled is True
+    assert settings.serpapi_timeout_seconds == 8.0
+    assert settings.serpapi_lens_exact_limit == 5
+    assert settings.serpapi_lens_visual_limit == 10
+    assert settings.serpapi_web_candidate_limit == 2
+    assert settings.vision_temp_store_backend == "r2"
+    assert settings.r2_presigned_url_seconds == 300
+    assert settings.r2_object_prefix == "vision-temp/"
+    assert settings.vision_cache_path.as_posix() == "data/vision_cache.sqlite3"
+    assert not hasattr(settings, "vision_model_mode")
+    assert not hasattr(settings, "vision_model_search_input")
+    assert not hasattr(settings, "vision_model_enable_search")
+    assert not hasattr(settings, "vision_model_search_timeout_seconds")
     assert settings.debug_trace_dir.as_posix() == "data/debug_traces"
     assert settings.debug_trace_retention_seconds == 86_400
 
@@ -273,14 +288,29 @@ def test_load_settings_reads_vision_model_overrides() -> None:
             "VISION_MODEL_API_BASE": "https://vision.example.test/v1",
             "VISION_MODEL_API_KEY": "vision-key",
             "VISION_MODEL_NAME": "qwen3.6-plus",
-            "VISION_MODEL_MODE": "search_only",
-            "VISION_MODEL_SEARCH_INPUT": "original_url",
             "VISION_MODEL_TIMEOUT_SECONDS": "9",
-            "VISION_MODEL_SEARCH_TIMEOUT_SECONDS": "91",
-            "VISION_MODEL_MAX_IMAGES": "3",
             "VISION_MODEL_ENABLE_THINKING": "false",
-            "VISION_MODEL_ENABLE_SEARCH": "false",
             "VISION_MODEL_VIDEO_FPS": "4.5",
+            "VISION_PIPELINE_TIMEOUT_SECONDS": "13.5",
+            "VISION_PIPELINE_MAX_IMAGES": "3",
+            "VISION_PIPELINE_CACHE_TTL_SECONDS": "120",
+            "VISION_PIPELINE_MAX_DOWNLOAD_BYTES": "2048",
+            "VISION_PIPELINE_MAX_IMAGE_PIXELS": "4096",
+            "SERPAPI_API_KEY": "serp-key",
+            "SERPAPI_LENS_ENABLED": "false",
+            "SERPAPI_SEARCH_ENABLED": "false",
+            "SERPAPI_TIMEOUT_SECONDS": "6.5",
+            "SERPAPI_LENS_EXACT_LIMIT": "4",
+            "SERPAPI_LENS_VISUAL_LIMIT": "8",
+            "SERPAPI_WEB_CANDIDATE_LIMIT": "1",
+            "VISION_TEMP_STORE_BACKEND": "r2",
+            "R2_ACCOUNT_ID": "account",
+            "R2_ACCESS_KEY_ID": "access",
+            "R2_SECRET_ACCESS_KEY": "secret",
+            "R2_BUCKET": "bucket",
+            "R2_PRESIGNED_URL_SECONDS": "180",
+            "R2_OBJECT_PREFIX": "temp/",
+            "VISION_CACHE_PATH": "data/test_vision.sqlite3",
         }
     )
 
@@ -290,29 +320,58 @@ def test_load_settings_reads_vision_model_overrides() -> None:
     assert settings.vision_model_api_base == "https://vision.example.test/v1"
     assert settings.vision_model_api_key == "vision-key"
     assert settings.vision_model_name == "qwen3.6-plus"
-    assert settings.vision_model_mode == "search_only"
-    assert settings.vision_model_search_input == "original_url"
-    assert settings.vision_model_timeout_seconds == 9
-    assert settings.vision_model_search_timeout_seconds == 91
-    assert settings.vision_model_max_images == 3
+    assert settings.vision_model_timeout_seconds == 9.0
     assert settings.vision_model_enable_thinking is False
-    assert settings.vision_model_enable_search is False
     assert settings.vision_model_video_fps == 4.5
+    assert settings.vision_pipeline_timeout_seconds == 13.5
+    assert settings.vision_pipeline_max_images == 3
+    assert settings.vision_pipeline_cache_ttl_seconds == 120
+    assert settings.vision_pipeline_max_download_bytes == 2048
+    assert settings.vision_pipeline_max_image_pixels == 4096
+    assert settings.serpapi_api_key == "serp-key"
+    assert settings.serpapi_lens_enabled is False
+    assert settings.serpapi_search_enabled is False
+    assert settings.serpapi_timeout_seconds == 6.5
+    assert settings.serpapi_lens_exact_limit == 4
+    assert settings.serpapi_lens_visual_limit == 8
+    assert settings.serpapi_web_candidate_limit == 1
+    assert settings.r2_account_id == "account"
+    assert settings.r2_access_key_id == "access"
+    assert settings.r2_secret_access_key == "secret"
+    assert settings.r2_bucket == "bucket"
+    assert settings.r2_presigned_url_seconds == 180
+    assert settings.r2_object_prefix == "temp/"
+    assert settings.vision_cache_path.as_posix() == "data/test_vision.sqlite3"
 
 
-def test_load_settings_rejects_invalid_vision_model_mode() -> None:
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("VISION_PIPELINE_TIMEOUT_SECONDS", "0"),
+        ("VISION_PIPELINE_MAX_IMAGES", "0"),
+        ("VISION_PIPELINE_CACHE_TTL_SECONDS", "0"),
+        ("VISION_PIPELINE_MAX_DOWNLOAD_BYTES", "0"),
+        ("VISION_PIPELINE_MAX_IMAGE_PIXELS", "0"),
+        ("SERPAPI_TIMEOUT_SECONDS", "0"),
+        ("SERPAPI_LENS_EXACT_LIMIT", "0"),
+        ("SERPAPI_LENS_VISUAL_LIMIT", "0"),
+        ("SERPAPI_WEB_CANDIDATE_LIMIT", "0"),
+        ("R2_PRESIGNED_URL_SECONDS", "0"),
+    ],
+)
+def test_load_settings_rejects_invalid_vision_pipeline_values(name: str, value: str) -> None:
     env = complete_env()
-    env["VISION_MODEL_MODE"] = "fast"
+    env[name] = value
 
-    with pytest.raises(ConfigError, match="VISION_MODEL_MODE"):
+    with pytest.raises(ConfigError, match=name):
         load_settings(env)
 
 
-def test_load_settings_rejects_invalid_vision_model_search_input() -> None:
+def test_load_settings_rejects_invalid_temp_store_backend() -> None:
     env = complete_env()
-    env["VISION_MODEL_SEARCH_INPUT"] = "cdn"
+    env["VISION_TEMP_STORE_BACKEND"] = "filesystem"
 
-    with pytest.raises(ConfigError, match="VISION_MODEL_SEARCH_INPUT"):
+    with pytest.raises(ConfigError, match="VISION_TEMP_STORE_BACKEND"):
         load_settings(env)
 
 
@@ -415,18 +474,6 @@ def test_load_settings_rejects_invalid_vision_model_limits() -> None:
     env["VISION_MODEL_TIMEOUT_SECONDS"] = "0"
 
     with pytest.raises(ConfigError, match="VISION_MODEL_TIMEOUT_SECONDS"):
-        load_settings(env)
-
-    env = complete_env()
-    env["VISION_MODEL_SEARCH_TIMEOUT_SECONDS"] = "0"
-
-    with pytest.raises(ConfigError, match="VISION_MODEL_SEARCH_TIMEOUT_SECONDS"):
-        load_settings(env)
-
-    env = complete_env()
-    env["VISION_MODEL_MAX_IMAGES"] = "0"
-
-    with pytest.raises(ConfigError, match="VISION_MODEL_MAX_IMAGES"):
         load_settings(env)
 
     env = complete_env()
