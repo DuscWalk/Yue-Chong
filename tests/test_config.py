@@ -1,5 +1,6 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 from qq_rolebot.config import ConfigError, load_settings, parse_int_set, parse_str_list
 

@@ -89,10 +89,19 @@ Required basics:
 - `REPEAT_REPLY_ENABLED`: whether the bot joins consecutive repeated group messages.
 - `REPEAT_REPLY_THRESHOLD`: how many consecutive matching messages trigger repeat reply. Minimum is `2`; the same text in the same group is then cooled down for 10 minutes.
 - `CONTEXT_WINDOW_SECONDS`: maximum age of messages included in model context; default is `600`.
-- `MEDIA_REPLY_ENABLED`: whether successful model text replies may append a persistent sticker image.
+- `MEDIA_REPLY_ENABLED`: whether successful model text replies may append a persistent sticker image
+  or a sendable `mface` sticker.
 - `MEDIA_REPLY_PROBABILITY`: `0` to `100`; chance to append a sticker after model text.
 - `MEDIA_STICKER_ROOT`: persistent sticker asset directory. Production default should be `/opt/qq-rolebot/stickers`.
 - `MEDIA_STICKER_MANIFEST`: optional manifest path; defaults to `MEDIA_STICKER_ROOT/manifest.yaml`.
+- `MEDIA_REGISTER_CUSTOM_FACES`: when true, active image assets are registered to the bot QQ
+  account through NapCat `/add_custom_face`.
+- `MEDIA_CUSTOM_FACE_CACHE`: server-local JSON cache for registration hashes; keep it under
+  `data/` and out of git.
+
+NapCat's `mface` send path is for marketplace stickers. Local images can be registered as QQ
+custom faces, but active sends fall back to ordinary image output unless a manifest item contains
+complete sendable `mface` metadata (`emoji_id`, `emoji_package_id`, `key`, and `summary`).
 - `VISION_MODEL_ENABLED`: whether to call a separate vision model after the bot has already decided to reply.
 - `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible vision model settings.
 - `VISION_MODEL_MODE`: visual understanding mode: `hybrid`, `search_only`, or `media_only`.

@@ -13,6 +13,7 @@ Expected paths:
 /opt/qq-rolebot/.env                    production secrets and runtime config
 /opt/qq-rolebot/.watchdog.env           server-only QQ Mail watchdog config
 /opt/qq-rolebot/data/rolebot.sqlite3    group settings and recent context
+/opt/qq-rolebot/data/custom_faces.json  local custom-face registration cache
 /opt/qq-rolebot/data/voice_cache        generated outgoing voice files
 /opt/qq-rolebot/data/voice_refs         authorized reference audio and transcripts
 /opt/qq-rolebot/stickers                persistent outgoing sticker assets and manifest
@@ -27,6 +28,10 @@ CI/CD preserves `.env`, `.watchdog.env`, `data/`, `voice_refs`, `voice_cache`, `
 
 Store production sticker images and `manifest.yaml` under `/opt/qq-rolebot/stickers`. The deploy
 script preserves this directory. Do not commit real sticker packs or generated media to git.
+When `MEDIA_REGISTER_CUSTOM_FACES=true`, the bot registers manifest image assets through NapCat
+`/add_custom_face` and records file hashes in `/opt/qq-rolebot/data/custom_faces.json`.
+NapCat `mface` sending is marketplace-sticker-specific, so locally registered custom faces may still
+be sent as ordinary images unless the manifest item includes complete sendable `mface` metadata.
 
 ## 1. Base System Setup
 
@@ -107,6 +112,22 @@ FOLLOWUP_TRIGGER_KEYWORDS=你,你觉得,你看,怎么看,咋看,怎么样,如何
 Existing groups keep their stored probability in SQLite. Use `/bot prob N` in a group to change that group without editing `.env`.
 When `REPEAT_REPLY_ENABLED=true`, the bot can join a repeated-message chain after `REPEAT_REPLY_THRESHOLD` consecutive identical unaddressed group messages from at least two users. After it joins, the same text in the same group is cooled down for 10 minutes.
 `CONTEXT_WINDOW_SECONDS` controls how far back model context can look. Successful bot replies are stored with user messages, and only records inside this window are included in the next prompt.
+
+Media replies:
+
+```dotenv
+MEDIA_REPLY_ENABLED=false
+MEDIA_REPLY_PROBABILITY=0
+MEDIA_STICKER_ROOT=/opt/qq-rolebot/stickers
+MEDIA_STICKER_MANIFEST=/opt/qq-rolebot/stickers/manifest.yaml
+MEDIA_REGISTER_CUSTOM_FACES=true
+MEDIA_CUSTOM_FACE_CACHE=/opt/qq-rolebot/data/custom_faces.json
+```
+
+Active media only appends after a successful model text reply. `MEDIA_REGISTER_CUSTOM_FACES=true`
+registers active image assets to the bot QQ account as custom faces. Locally registered custom faces
+do not necessarily have the `key` needed for NapCat `mface` sends; use ordinary image fallback or
+provide marketplace `mface` metadata in the manifest for true `mface` output.
 
 Tools:
 
