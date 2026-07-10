@@ -27,7 +27,7 @@ class OutgoingMessage:
 
 
 class _TextAccessor:
-    def __get__(self, instance: "OutgoingReply | None", owner: "type[OutgoingReply]"):
+    def __get__(self, instance: OutgoingReply | None, owner: type[OutgoingReply]):
         if instance is None:
             return lambda text, *, source: owner(
                 source=source,
@@ -51,5 +51,5 @@ class OutgoingReply:
     def is_empty(self) -> bool:
         return not [message for message in self.messages if not message.is_empty]
 
-    def with_message(self, message: OutgoingMessage) -> "OutgoingReply":
+    def with_message(self, message: OutgoingMessage) -> OutgoingReply:
         return OutgoingReply(source=self.source, messages=[*self.messages, message])
