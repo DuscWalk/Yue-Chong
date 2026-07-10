@@ -337,8 +337,8 @@ items:
 
     await module.register_custom_faces(FakeBot())
 
-    assert calls[0][0] == "add_custom_face"
-    assert calls[0][1]["file"] == str(image)
+    add_calls = [(name, params) for name, params in calls if name == "add_custom_face"]
+    assert add_calls == [("add_custom_face", {"file": str(image), "is_origin": True})]
 
 
 async def test_handle_message_continues_when_replied_message_fetch_fails(monkeypatch) -> None:

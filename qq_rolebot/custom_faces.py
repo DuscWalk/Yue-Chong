@@ -38,6 +38,8 @@ class CustomFaceRegistrar:
 
     async def register_all(self) -> CustomFaceRegistrationResult:
         cache = self._load_cache()
+        details = await self._fetch_details()
+        details_by_md5 = self._details_by_md5(details)
         registered = 0
         skipped = 0
         failed = 0
@@ -45,16 +47,35 @@ class CustomFaceRegistrar:
             if not item.path.is_file():
                 continue
             digest = self._sha256(item.path)
+            file_md5 = self._md5(item.path)
             cached = cache.get(item.id)
-            if isinstance(cached, dict) and cached.get("sha256") == digest:
+            if (
+                isinstance(cached, dict)
+                and cached.get("sha256") == digest
+                and cached.get("status") == "registered"
+            ):
                 skipped += 1
                 continue
-            try:
-                await self.client.add_custom_face(file=str(item.path), is_origin=True)
-                details = await self.client.fetch_custom_face_detail(count=48)
+            detail = details_by_md5.get(file_md5)
+            if detail is not None:
                 registered += 1
                 cache[item.id] = {
                     "sha256": digest,
+                    "md5": file_md5,
+                    "path": str(item.path),
+                    "status": "registered",
+                    "source": "custom_face_detail",
+                    "res_id": str(detail.get("resId", "") or ""),
+                }
+                continue
+            try:
+                await self.client.add_custom_face(file=str(item.path), is_origin=True)
+                details = await self._fetch_details()
+                details_by_md5 = self._details_by_md5(details)
+                registered += 1
+                cache[item.id] = {
+                    "sha256": digest,
+                    "md5": file_md5,
                     "path": str(item.path),
                     "status": "registered",
                     "detail_count": len(details) if isinstance(details, list) else None,
@@ -63,9 +84,10 @@ class CustomFaceRegistrar:
                 failed += 1
                 cache[item.id] = {
                     "sha256": digest,
+                    "md5": file_md5,
                     "path": str(item.path),
                     "status": "failed",
-                    "error": exc.__class__.__name__,
+                    "error": f"{exc.__class__.__name__}: {str(exc)[:200]}",
                 }
         self._save_cache(cache)
         return CustomFaceRegistrationResult(
@@ -97,3 +119,29 @@ class CustomFaceRegistrar:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
         return digest.hexdigest()
+
+    @staticmethod
+    def _md5(path: Path) -> str:
+        digest = hashlib.md5()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest().upper()
+
+    async def _fetch_details(self) -> list[Any]:
+        try:
+            details = await self.client.fetch_custom_face_detail(count=48)
+        except Exception:
+            return []
+        return details if isinstance(details, list) else []
+
+    @staticmethod
+    def _details_by_md5(details: list[Any]) -> dict[str, dict[str, Any]]:
+        matched: dict[str, dict[str, Any]] = {}
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            raw_md5 = str(detail.get("md5", "") or "").strip().upper()
+            if raw_md5:
+                matched[raw_md5] = detail
+        return matched
