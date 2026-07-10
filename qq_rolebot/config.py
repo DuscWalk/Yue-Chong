@@ -74,6 +74,10 @@ class Settings:
     model_timeout_seconds: int
     max_output_chars: int
     default_random_reply_probability: int
+    media_reply_enabled: bool
+    media_reply_probability: int
+    media_sticker_root: Path
+    media_sticker_manifest: Path
     repeat_reply_enabled: bool
     repeat_reply_threshold: int
     context_window_seconds: int
@@ -131,6 +135,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     probability = _int(env, "DEFAULT_RANDOM_REPLY_PROBABILITY", 8)
     if probability < 0 or probability > 100:
         raise ConfigError("DEFAULT_RANDOM_REPLY_PROBABILITY must be between 0 and 100")
+
+    media_reply_probability = _int(env, "MEDIA_REPLY_PROBABILITY", 0)
+    if media_reply_probability < 0 or media_reply_probability > 100:
+        raise ConfigError("MEDIA_REPLY_PROBABILITY must be between 0 and 100")
 
     repeat_reply_threshold = _int(env, "REPEAT_REPLY_THRESHOLD", 2)
     if repeat_reply_threshold < 2:
@@ -225,6 +233,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     else:
         persona_path = Path(env.get("PERSONA_PATH", "personas/default.yaml"))
 
+    media_sticker_root = Path(env.get("MEDIA_STICKER_ROOT", "stickers").strip() or "stickers")
+    raw_media_manifest = env.get("MEDIA_STICKER_MANIFEST", "").strip()
+    media_sticker_manifest = (
+        Path(raw_media_manifest) if raw_media_manifest else media_sticker_root / "manifest.yaml"
+    )
+
     admin_users = parse_int_set(_required(env, "ADMIN_USERS"))
     group_whitelist = parse_int_set(_required(env, "GROUP_WHITELIST"))
 
@@ -244,6 +258,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         model_timeout_seconds=timeout,
         max_output_chars=max_output_chars,
         default_random_reply_probability=probability,
+        media_reply_enabled=_bool(env, "MEDIA_REPLY_ENABLED", False),
+        media_reply_probability=media_reply_probability,
+        media_sticker_root=media_sticker_root,
+        media_sticker_manifest=media_sticker_manifest,
         repeat_reply_enabled=_bool(env, "REPEAT_REPLY_ENABLED", True),
         repeat_reply_threshold=repeat_reply_threshold,
         context_window_seconds=context_window_seconds,
