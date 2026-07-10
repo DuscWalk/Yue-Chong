@@ -9,6 +9,7 @@ from nonebot import get_driver, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
 
 from qq_rolebot.config import load_settings
+from qq_rolebot.custom_faces import CustomFaceRegistrar
 from qq_rolebot.debug_trace import DebugTraceLogger
 from qq_rolebot.message_segments import (
     MediaUrls,
@@ -150,10 +151,45 @@ if settings.tts_enabled and settings.tts_api_url:
 
 matcher = on_message(priority=50, block=False)
 _conversation_locks: defaultdict[tuple[str, int], asyncio.Lock] = defaultdict(asyncio.Lock)
+_custom_faces_registration_lock = asyncio.Lock()
+_custom_faces_registered = False
 
 
 async def init_storage() -> None:
     await storage.init()
+
+
+class BotCustomFaceClient:
+    def __init__(self, bot: Bot) -> None:
+        self.bot = bot
+
+    async def add_custom_face(self, *, file: str, is_origin: bool = True):
+        return await self.bot.call_api("add_custom_face", file=file, is_origin=is_origin)
+
+    async def fetch_custom_face_detail(self, *, count: int = 48):
+        return await self.bot.call_api("fetch_custom_face_detail", count=count)
+
+
+async def register_custom_faces(bot: Bot) -> None:
+    if not settings.media_register_custom_faces:
+        return
+    registrar = CustomFaceRegistrar(
+        library=sticker_library,
+        cache_path=settings.media_custom_face_cache,
+        client=BotCustomFaceClient(bot),
+    )
+    await registrar.register_all()
+
+
+async def ensure_custom_faces_registered(bot: Bot) -> None:
+    global _custom_faces_registered
+    if _custom_faces_registered or not settings.media_register_custom_faces:
+        return
+    async with _custom_faces_registration_lock:
+        if _custom_faces_registered:
+            return
+        await register_custom_faces(bot)
+        _custom_faces_registered = True
 
 
 try:
@@ -163,6 +199,8 @@ except ValueError:
 
 if driver is not None:
     driver.on_startup(init_storage)
+    if hasattr(driver, "on_bot_connect"):
+        driver.on_bot_connect(register_custom_faces)
 
 
 def extract_message_text(event: MessageEvent) -> str:
@@ -373,6 +411,7 @@ async def handle_message(bot: Bot, event: MessageEvent) -> None:
 
 
 async def _handle_message_locked(bot: Bot, event: MessageEvent) -> None:
+    await ensure_custom_faces_registered(bot)
     incoming = build_incoming_message(event, settings.bot_qq)
     if incoming is not None and not (incoming.image_urls or incoming.video_urls):
         fetched_media_urls = await fetch_replied_media_urls(bot, incoming.reply_message_id)

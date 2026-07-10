@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+from dataclasses import replace
 from types import SimpleNamespace
 
 
@@ -299,6 +300,45 @@ async def test_handle_message_fetches_replied_image_when_reply_payload_missing(
     assert seen["incoming"].image_urls == ["https://example.test/fetched.jpg"]
     assert seen["incoming"].media_source == "replied_message_fetch"
     assert seen["incoming"].reply_message_id == "12345"
+
+
+async def test_register_custom_faces_uses_bot_api(monkeypatch, tmp_path) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+    root = tmp_path / "stickers"
+    root.mkdir()
+    image = root / "a.jpg"
+    image.write_bytes(b"image")
+    manifest = root / "manifest.yaml"
+    manifest.write_text(
+        """
+items:
+  - id: a
+    file: a.jpg
+    type: custom_face
+    tags: [reply]
+""".strip(),
+        encoding="utf-8",
+    )
+    module.sticker_library = module.StickerLibrary(root=root, manifest_path=manifest)
+    module.settings = replace(
+        module.settings,
+        media_register_custom_faces=True,
+        media_custom_face_cache=tmp_path / "cache.json",
+    )
+    calls = []
+
+    class FakeBot:
+        async def call_api(self, name, **params):
+            calls.append((name, params))
+            if name == "fetch_custom_face_detail":
+                return []
+            return {"result": 0}
+
+    await module.register_custom_faces(FakeBot())
+
+    assert calls[0][0] == "add_custom_face"
+    assert calls[0][1]["file"] == str(image)
 
 
 async def test_handle_message_continues_when_replied_message_fetch_fails(monkeypatch) -> None:
