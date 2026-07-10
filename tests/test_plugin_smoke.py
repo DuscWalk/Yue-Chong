@@ -633,11 +633,12 @@ async def test_handle_message_sends_voice_record_when_rendered(monkeypatch, tmp_
         def __init__(self):
             self.sent = []
 
-        async def send(self, event, message):
-            self.sent.append(message)
+        async def send(self, event, message, **kwargs):
+            self.sent.append((message, kwargs))
 
     event = SimpleNamespace(
-        message_type="private",
+        message_type="group",
+        group_id=20,
         user_id=99,
         sender=SimpleNamespace(nickname="Amy"),
         time=123,
@@ -651,7 +652,9 @@ async def test_handle_message_sends_voice_record_when_rendered(monkeypatch, tmp_
     await module.handle_message(bot, event)
 
     assert bot.sent
-    assert "record" in str(bot.sent[0])
+    message, kwargs = bot.sent[0]
+    assert "record" in str(message)
+    assert kwargs == {}
 
 
 async def test_handle_message_sends_text_when_voice_not_rendered(monkeypatch) -> None:
@@ -701,8 +704,8 @@ async def test_render_outgoing_reply_sends_text_and_image_separately(monkeypatch
         def __init__(self):
             self.sent = []
 
-        async def send(self, event, message):
-            self.sent.append(str(message))
+        async def send(self, event, message, **kwargs):
+            self.sent.append((str(message), kwargs))
 
     bot = FakeBot()
     reply = OutgoingReply(
@@ -712,9 +715,88 @@ async def test_render_outgoing_reply_sends_text_and_image_separately(monkeypatch
             OutgoingMessage(kind="image", file="/opt/qq-rolebot/stickers/calm.webp"),
         ],
     )
+    event = SimpleNamespace(message_type="group", group_id=20, user_id=99, message_id=12345)
 
-    await module.send_outgoing_reply(bot, object(), reply)
+    await module.send_outgoing_reply(bot, event, reply)
 
     assert len(bot.sent) == 2
-    assert "一切安好" in bot.sent[0]
-    assert "image" in bot.sent[1]
+    assert "一切安好" in bot.sent[0][0]
+    assert bot.sent[0][1] == {"reply_message": True, "at_sender": True}
+    assert "image" in bot.sent[1][0]
+    assert bot.sent[1][1] == {}
+
+
+async def test_send_outgoing_reply_quotes_first_rendered_group_message(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, event, message, **kwargs):
+            self.sent.append((str(message), kwargs))
+
+    reply = module.OutgoingReply(
+        source="model",
+        messages=[
+            module.OutgoingMessage(kind="text", text=""),
+            module.OutgoingMessage(kind="image", file="/opt/qq-rolebot/stickers/calm.webp"),
+        ],
+    )
+    event = SimpleNamespace(message_type="group", group_id=20, user_id=99, message_id=12345)
+    bot = FakeBot()
+
+    await module.send_outgoing_reply(bot, event, reply)
+
+    assert len(bot.sent) == 1
+    assert "image" in bot.sent[0][0]
+    assert bot.sent[0][1] == {"reply_message": True, "at_sender": True}
+
+
+async def test_send_outgoing_reply_does_not_quote_group_repeat(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, event, message, **kwargs):
+            self.sent.append((str(message), kwargs))
+
+    event = SimpleNamespace(message_type="group", group_id=20, user_id=99, message_id=12345)
+    bot = FakeBot()
+
+    await module.send_outgoing_reply(
+        bot,
+        event,
+        module.OutgoingReply.text("复读内容", source="repeat"),
+    )
+
+    assert len(bot.sent) == 1
+    assert bot.sent[0][1] == {}
+
+
+async def test_send_outgoing_reply_does_not_quote_private_reply(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, event, message, **kwargs):
+            self.sent.append((str(message), kwargs))
+
+    event = SimpleNamespace(message_type="private", user_id=99, message_id=12345)
+    bot = FakeBot()
+
+    await module.send_outgoing_reply(
+        bot,
+        event,
+        module.OutgoingReply.text("私聊内容", source="model"),
+    )
+
+    assert len(bot.sent) == 1
+    assert bot.sent[0][1] == {}

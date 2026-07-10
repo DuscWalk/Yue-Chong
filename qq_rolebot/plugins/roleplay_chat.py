@@ -396,10 +396,19 @@ def render_outgoing_message(message: OutgoingMessage) -> MessageSegment | None:
 
 
 async def send_outgoing_reply(bot: Bot, event: MessageEvent, reply: OutgoingReply) -> None:
+    quote_first_message = (
+        getattr(event, "message_type", "") == "group" and reply.source != "repeat"
+    )
+    first_rendered_message = True
     for outgoing_message in reply.messages:
         segment = render_outgoing_message(outgoing_message)
-        if segment is not None:
+        if segment is None:
+            continue
+        if quote_first_message and first_rendered_message:
+            await bot.send(event, segment, reply_message=True, at_sender=True)
+        else:
             await bot.send(event, segment)
+        first_rendered_message = False
 
 
 async def _service_handle_reply(
