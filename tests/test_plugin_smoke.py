@@ -543,3 +543,31 @@ async def test_handle_message_sends_text_when_voice_not_rendered(monkeypatch) ->
     assert bot.sent
     assert "record" not in str(bot.sent[0])
     assert "一切安好" in str(bot.sent[0])
+
+
+async def test_render_outgoing_reply_sends_text_and_image_separately(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+    from qq_rolebot.outgoing import OutgoingMessage, OutgoingReply
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, event, message):
+            self.sent.append(str(message))
+
+    bot = FakeBot()
+    reply = OutgoingReply(
+        source="model",
+        messages=[
+            OutgoingMessage(kind="text", text="一切安好。"),
+            OutgoingMessage(kind="image", file="/opt/qq-rolebot/stickers/calm.webp"),
+        ],
+    )
+
+    await module.send_outgoing_reply(bot, object(), reply)
+
+    assert len(bot.sent) == 2
+    assert "一切安好" in bot.sent[0]
+    assert "image" in bot.sent[1]

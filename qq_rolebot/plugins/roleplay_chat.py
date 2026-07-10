@@ -18,6 +18,7 @@ from qq_rolebot.message_segments import (
     summarize_segments,
 )
 from qq_rolebot.model_client import ModelClient
+from qq_rolebot.outgoing import OutgoingMessage, OutgoingReply
 from qq_rolebot.persona import load_persona
 from qq_rolebot.persona_sources import PersonaSourceClient
 from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter
@@ -289,6 +290,27 @@ def conversation_scope(event: MessageEvent) -> tuple[str, int]:
     if message_type == "private":
         return ("private", int(getattr(event, "user_id", 0)))
     return (message_type or "unknown", int(getattr(event, "user_id", 0)))
+
+
+def render_outgoing_message(message: OutgoingMessage) -> MessageSegment | None:
+    if message.kind == "text" and message.text.strip():
+        return MessageSegment.text(message.text.strip())
+    if message.kind == "image":
+        value = message.file.strip() or message.url.strip()
+        return MessageSegment.image(value) if value else None
+    if message.kind == "face" and message.face_id.strip():
+        return MessageSegment.face(int(message.face_id))
+    if message.kind == "record":
+        value = message.file.strip() or message.url.strip()
+        return MessageSegment.record(value) if value else None
+    return None
+
+
+async def send_outgoing_reply(bot: Bot, event: MessageEvent, reply: OutgoingReply) -> None:
+    for outgoing_message in reply.messages:
+        segment = render_outgoing_message(outgoing_message)
+        if segment is not None:
+            await bot.send(event, segment)
 
 
 @matcher.handle()
