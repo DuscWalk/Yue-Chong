@@ -38,6 +38,31 @@ def test_roleplay_plugin_imports(monkeypatch) -> None:
     assert hasattr(module, "extract_message_text")
 
 
+def test_render_outgoing_message_renders_mface(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+
+    segment = module.render_outgoing_message(
+        module.OutgoingMessage(
+            kind="mface",
+            emoji_id="123",
+            emoji_package_id="456",
+            key="send-key",
+            summary="[测试表情]",
+            source="repeat",
+        )
+    )
+
+    assert segment is not None
+    assert segment.type == "mface"
+    assert segment.data == {
+        "emoji_id": "123",
+        "emoji_package_id": 456,
+        "key": "send-key",
+        "summary": "[测试表情]",
+    }
+
+
 def test_plugin_builds_private_incoming_message(monkeypatch) -> None:
     set_env(monkeypatch)
     module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")

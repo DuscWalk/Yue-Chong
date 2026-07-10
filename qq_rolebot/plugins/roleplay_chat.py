@@ -324,6 +324,16 @@ def render_outgoing_message(message: OutgoingMessage) -> MessageSegment | None:
         return MessageSegment.image(value) if value else None
     if message.kind == "face" and message.face_id.strip():
         return MessageSegment.face(int(message.face_id))
+    if message.kind == "mface" and not message.is_empty:
+        return MessageSegment(
+            "mface",
+            {
+                "emoji_id": message.emoji_id.strip(),
+                "emoji_package_id": int(message.emoji_package_id),
+                "key": message.key.strip(),
+                "summary": message.summary.strip(),
+            },
+        )
     if message.kind == "record":
         value = message.file.strip() or message.url.strip()
         return MessageSegment.record(value) if value else None

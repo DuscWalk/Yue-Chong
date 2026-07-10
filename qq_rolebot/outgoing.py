@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-OutgoingKind = Literal["text", "image", "face", "record"]
+OutgoingKind = Literal["text", "image", "face", "mface", "record"]
 
 
 @dataclass(frozen=True)
@@ -13,6 +13,10 @@ class OutgoingMessage:
     file: str = ""
     url: str = ""
     face_id: str = ""
+    emoji_id: str = ""
+    emoji_package_id: str = ""
+    key: str = ""
+    summary: str = ""
     source: str = ""
 
     @property
@@ -23,6 +27,13 @@ class OutgoingMessage:
             return not (self.file.strip() or self.url.strip())
         if self.kind == "face":
             return not self.face_id.strip()
+        if self.kind == "mface":
+            return not (
+                self.emoji_id.strip()
+                and self.emoji_package_id.strip()
+                and self.key.strip()
+                and self.summary.strip()
+            )
         return True
 
 

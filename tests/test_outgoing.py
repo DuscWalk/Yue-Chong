@@ -14,3 +14,20 @@ def test_outgoing_reply_filters_empty_messages() -> None:
 
     assert reply.is_empty is True
     assert reply.text == ""
+
+
+def test_outgoing_mface_is_not_empty() -> None:
+    message = OutgoingMessage(
+        kind="mface",
+        emoji_id="123",
+        emoji_package_id="456",
+        key="send-key",
+        summary="[测试表情]",
+        source="repeat",
+    )
+
+    assert message.is_empty is False
+
+
+def test_outgoing_mface_requires_send_fields() -> None:
+    assert OutgoingMessage(kind="mface", emoji_id="123").is_empty is True
