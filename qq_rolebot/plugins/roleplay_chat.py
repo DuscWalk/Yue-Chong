@@ -23,7 +23,9 @@ from qq_rolebot.outgoing import OutgoingMessage, OutgoingReply
 from qq_rolebot.persona import load_persona
 from qq_rolebot.persona_sources import PersonaSourceClient
 from qq_rolebot.policy import FollowupTracker, IncomingMessage, RateLimiter
+from qq_rolebot.reply_enhancer import ReplyEnhancer
 from qq_rolebot.service import ChatService
+from qq_rolebot.stickers import StickerLibrary
 from qq_rolebot.storage import Storage
 from qq_rolebot.tavily import TavilyClient
 from qq_rolebot.time_tool import TimeTool
@@ -109,6 +111,16 @@ service = ChatService(
         retention_seconds=settings.debug_trace_retention_seconds,
     ),
 )
+sticker_library = StickerLibrary(
+    root=settings.media_sticker_root,
+    manifest_path=settings.media_sticker_manifest,
+)
+reply_enhancer = ReplyEnhancer(
+    enabled=settings.media_reply_enabled,
+    probability=settings.media_reply_probability,
+    library=sticker_library,
+)
+service.reply_enhancer = reply_enhancer
 voice_service = None
 if settings.tts_enabled and settings.tts_api_url:
     voice_service = VoiceService(

@@ -288,7 +288,10 @@ class ChatService:
             created_at=message.created_at,
         )
         self._trace(trace, "reply.final", {"reply": reply, "source": "model"})
-        return OutgoingReply.text(reply, source="model")
+        outgoing = OutgoingReply.text(reply, source="model")
+        if self.reply_enhancer is not None:
+            outgoing = self.reply_enhancer.enhance(outgoing, random_value=random_value)
+        return outgoing
 
     async def _vision_context(
         self,
@@ -555,7 +558,10 @@ class ChatService:
 
         await self._save_bot_reply(group_id=context_id, reply=reply, created_at=message.created_at)
         self._trace(trace, "reply.final", {"reply": reply, "source": "model"})
-        return OutgoingReply.text(reply, source="model")
+        outgoing = OutgoingReply.text(reply, source="model")
+        if self.reply_enhancer is not None:
+            outgoing = self.reply_enhancer.enhance(outgoing, random_value=random_value)
+        return outgoing
 
     def _start_trace(self, message: IncomingMessage) -> DebugTrace | None:
         if self.trace_logger is None:

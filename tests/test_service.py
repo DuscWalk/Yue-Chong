@@ -597,6 +597,38 @@ async def test_service_passes_tool_context_to_model(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_service_appends_sticker_only_after_model_reply(tmp_path: Path) -> None:
+    raw_env = env(tmp_path)
+    raw_env["MEDIA_REPLY_ENABLED"] = "true"
+    raw_env["MEDIA_REPLY_PROBABILITY"] = "100"
+    settings = load_settings(raw_env)
+    storage = Storage(settings.database_path)
+    await storage.init()
+    await storage.set_group_enabled(20, True)
+    service = ChatService(
+        settings=settings,
+        storage=storage,
+        model=FakeModel(),
+        rate_limiter=RateLimiter(),
+    )
+
+    class FakeEnhancer:
+        def enhance(self, reply, *, random_value: int):
+            from qq_rolebot.outgoing import OutgoingMessage
+
+            return reply.with_message(
+                OutgoingMessage(kind="image", file="calm.webp", source="sticker")
+            )
+
+    service.reply_enhancer = FakeEnhancer()
+
+    reply = await service.handle_reply(msg("hello", at_bot=True), random_value=0)
+
+    assert reply is not None
+    assert [message.kind for message in reply.messages] == ["text", "image"]
+
+
+@pytest.mark.asyncio
 async def test_service_passes_vision_context_to_model_after_trigger(tmp_path: Path) -> None:
     settings = load_settings(env(tmp_path))
     storage = Storage(settings.database_path)
