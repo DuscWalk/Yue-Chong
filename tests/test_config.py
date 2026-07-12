@@ -216,22 +216,32 @@ def test_load_settings_reads_tts_defaults() -> None:
     assert settings.vision_model_api_base == ""
     assert settings.vision_model_api_key == ""
     assert settings.vision_model_name == "qwen3.6-plus"
-    assert settings.vision_model_timeout_seconds == 8.0
+    assert settings.vision_model_timeout_seconds == 20.0
     assert settings.vision_model_enable_thinking is False
     assert settings.vision_model_video_fps == 2.0
-    assert settings.vision_pipeline_timeout_seconds == 15.0
-    assert settings.vision_pipeline_max_images == 2
+    assert settings.vision_pipeline_timeout_seconds == 50.0
+    assert settings.vision_pipeline_multi_timeout_seconds == 70.0
+    assert settings.vision_pipeline_max_images == 4
+    assert settings.vision_pipeline_model_max_edge == 1600
     assert settings.vision_pipeline_cache_ttl_seconds == 86_400
     assert settings.vision_pipeline_max_download_bytes == 10_485_760
     assert settings.vision_pipeline_max_image_pixels == 20_000_000
     assert settings.serpapi_api_key == ""
     assert settings.serpapi_lens_enabled is True
     assert settings.serpapi_search_enabled is True
+    assert settings.serpapi_lens_timeout_seconds == 35.0
+    assert settings.serpapi_poll_interval_seconds == 0.75
+    assert settings.serpapi_lens_concurrency == 2
+    assert settings.serpapi_exact_fallback_enabled is True
+    assert settings.serpapi_web_fallback_enabled is True
+    assert settings.serpapi_max_exact_fallbacks_per_message == 2
+    assert settings.serpapi_max_web_fallbacks_per_message == 2
     assert settings.serpapi_timeout_seconds == 8.0
     assert settings.serpapi_lens_exact_limit == 5
     assert settings.serpapi_lens_visual_limit == 10
     assert settings.serpapi_web_candidate_limit == 2
     assert settings.vision_temp_store_backend == "r2"
+    assert settings.vision_temp_publisher_enabled is False
     assert settings.r2_presigned_url_seconds == 300
     assert settings.r2_object_prefix == "vision-temp/"
     assert settings.vision_cache_path.as_posix() == "data/vision_cache.sqlite3"
@@ -291,19 +301,29 @@ def test_load_settings_reads_vision_model_overrides() -> None:
             "VISION_MODEL_TIMEOUT_SECONDS": "9",
             "VISION_MODEL_ENABLE_THINKING": "false",
             "VISION_MODEL_VIDEO_FPS": "4.5",
-            "VISION_PIPELINE_TIMEOUT_SECONDS": "13.5",
+            "VISION_PIPELINE_TIMEOUT_SECONDS": "30",
+            "VISION_PIPELINE_MULTI_TIMEOUT_SECONDS": "44",
             "VISION_PIPELINE_MAX_IMAGES": "3",
+            "VISION_PIPELINE_MODEL_MAX_EDGE": "1200",
             "VISION_PIPELINE_CACHE_TTL_SECONDS": "120",
             "VISION_PIPELINE_MAX_DOWNLOAD_BYTES": "2048",
             "VISION_PIPELINE_MAX_IMAGE_PIXELS": "4096",
             "SERPAPI_API_KEY": "serp-key",
             "SERPAPI_LENS_ENABLED": "false",
             "SERPAPI_SEARCH_ENABLED": "false",
+            "SERPAPI_LENS_TIMEOUT_SECONDS": "31",
+            "SERPAPI_POLL_INTERVAL_SECONDS": "0.5",
+            "SERPAPI_LENS_CONCURRENCY": "3",
+            "SERPAPI_EXACT_FALLBACK_ENABLED": "false",
+            "SERPAPI_WEB_FALLBACK_ENABLED": "false",
+            "SERPAPI_MAX_EXACT_FALLBACKS_PER_MESSAGE": "1",
+            "SERPAPI_MAX_WEB_FALLBACKS_PER_MESSAGE": "0",
             "SERPAPI_TIMEOUT_SECONDS": "6.5",
             "SERPAPI_LENS_EXACT_LIMIT": "4",
             "SERPAPI_LENS_VISUAL_LIMIT": "8",
             "SERPAPI_WEB_CANDIDATE_LIMIT": "1",
             "VISION_TEMP_STORE_BACKEND": "r2",
+            "VISION_TEMP_PUBLISHER_ENABLED": "false",
             "R2_ACCOUNT_ID": "account",
             "R2_ACCESS_KEY_ID": "access",
             "R2_SECRET_ACCESS_KEY": "secret",
@@ -323,14 +343,23 @@ def test_load_settings_reads_vision_model_overrides() -> None:
     assert settings.vision_model_timeout_seconds == 9.0
     assert settings.vision_model_enable_thinking is False
     assert settings.vision_model_video_fps == 4.5
-    assert settings.vision_pipeline_timeout_seconds == 13.5
+    assert settings.vision_pipeline_timeout_seconds == 30.0
+    assert settings.vision_pipeline_multi_timeout_seconds == 44.0
     assert settings.vision_pipeline_max_images == 3
+    assert settings.vision_pipeline_model_max_edge == 1200
     assert settings.vision_pipeline_cache_ttl_seconds == 120
     assert settings.vision_pipeline_max_download_bytes == 2048
     assert settings.vision_pipeline_max_image_pixels == 4096
     assert settings.serpapi_api_key == "serp-key"
     assert settings.serpapi_lens_enabled is False
     assert settings.serpapi_search_enabled is False
+    assert settings.serpapi_lens_timeout_seconds == 31.0
+    assert settings.serpapi_poll_interval_seconds == 0.5
+    assert settings.serpapi_lens_concurrency == 3
+    assert settings.serpapi_exact_fallback_enabled is False
+    assert settings.serpapi_web_fallback_enabled is False
+    assert settings.serpapi_max_exact_fallbacks_per_message == 1
+    assert settings.serpapi_max_web_fallbacks_per_message == 0
     assert settings.serpapi_timeout_seconds == 6.5
     assert settings.serpapi_lens_exact_limit == 4
     assert settings.serpapi_lens_visual_limit == 8
@@ -348,11 +377,16 @@ def test_load_settings_reads_vision_model_overrides() -> None:
     ("name", "value"),
     [
         ("VISION_PIPELINE_TIMEOUT_SECONDS", "0"),
+        ("VISION_PIPELINE_MULTI_TIMEOUT_SECONDS", "0"),
         ("VISION_PIPELINE_MAX_IMAGES", "0"),
+        ("VISION_PIPELINE_MODEL_MAX_EDGE", "0"),
         ("VISION_PIPELINE_CACHE_TTL_SECONDS", "0"),
         ("VISION_PIPELINE_MAX_DOWNLOAD_BYTES", "0"),
         ("VISION_PIPELINE_MAX_IMAGE_PIXELS", "0"),
         ("SERPAPI_TIMEOUT_SECONDS", "0"),
+        ("SERPAPI_LENS_TIMEOUT_SECONDS", "0"),
+        ("SERPAPI_POLL_INTERVAL_SECONDS", "0"),
+        ("SERPAPI_LENS_CONCURRENCY", "0"),
         ("SERPAPI_LENS_EXACT_LIMIT", "0"),
         ("SERPAPI_LENS_VISUAL_LIMIT", "0"),
         ("SERPAPI_WEB_CANDIDATE_LIMIT", "0"),
@@ -372,6 +406,38 @@ def test_load_settings_rejects_invalid_temp_store_backend() -> None:
     env["VISION_TEMP_STORE_BACKEND"] = "filesystem"
 
     with pytest.raises(ConfigError, match="VISION_TEMP_STORE_BACKEND"):
+        load_settings(env)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "SERPAPI_MAX_EXACT_FALLBACKS_PER_MESSAGE",
+        "SERPAPI_MAX_WEB_FALLBACKS_PER_MESSAGE",
+    ],
+)
+def test_load_settings_rejects_negative_fallback_limit(name: str) -> None:
+    env = complete_env()
+    env[name] = "-1"
+
+    with pytest.raises(ConfigError, match=name):
+        load_settings(env)
+
+
+def test_load_settings_rejects_multi_timeout_below_single_timeout() -> None:
+    env = complete_env()
+    env["VISION_PIPELINE_TIMEOUT_SECONDS"] = "50"
+    env["VISION_PIPELINE_MULTI_TIMEOUT_SECONDS"] = "49"
+
+    with pytest.raises(ConfigError, match="VISION_PIPELINE_MULTI_TIMEOUT_SECONDS"):
+        load_settings(env)
+
+
+def test_load_settings_rejects_unimplemented_temp_publisher() -> None:
+    env = complete_env()
+    env["VISION_TEMP_PUBLISHER_ENABLED"] = "true"
+
+    with pytest.raises(ConfigError, match="VISION_TEMP_PUBLISHER_ENABLED.*not supported"):
         load_settings(env)
 
 

@@ -120,17 +120,27 @@ class Settings:
     vision_model_enable_thinking: bool
     vision_model_video_fps: float
     vision_pipeline_timeout_seconds: float
+    vision_pipeline_multi_timeout_seconds: float
     vision_pipeline_max_images: int
+    vision_pipeline_model_max_edge: int
     vision_pipeline_cache_ttl_seconds: int
     vision_pipeline_max_download_bytes: int
     vision_pipeline_max_image_pixels: int
     serpapi_api_key: str
     serpapi_lens_enabled: bool
     serpapi_search_enabled: bool
+    serpapi_lens_timeout_seconds: float
+    serpapi_poll_interval_seconds: float
+    serpapi_lens_concurrency: int
+    serpapi_exact_fallback_enabled: bool
+    serpapi_web_fallback_enabled: bool
+    serpapi_max_exact_fallbacks_per_message: int
+    serpapi_max_web_fallbacks_per_message: int
     serpapi_timeout_seconds: float
     serpapi_lens_exact_limit: int
     serpapi_lens_visual_limit: int
     serpapi_web_candidate_limit: int
+    vision_temp_publisher_enabled: bool
     vision_temp_store_backend: str
     r2_account_id: str
     r2_access_key_id: str
@@ -197,17 +207,32 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if tts_timeout_seconds < 1:
         raise ConfigError("TTS_TIMEOUT_SECONDS must be greater than 0")
 
-    vision_model_timeout_seconds = _float(env, "VISION_MODEL_TIMEOUT_SECONDS", 8.0)
+    vision_model_timeout_seconds = _float(env, "VISION_MODEL_TIMEOUT_SECONDS", 20.0)
     if vision_model_timeout_seconds <= 0:
         raise ConfigError("VISION_MODEL_TIMEOUT_SECONDS must be greater than 0")
 
-    vision_pipeline_timeout_seconds = _float(env, "VISION_PIPELINE_TIMEOUT_SECONDS", 15.0)
+    vision_pipeline_timeout_seconds = _float(env, "VISION_PIPELINE_TIMEOUT_SECONDS", 50.0)
     if vision_pipeline_timeout_seconds <= 0:
         raise ConfigError("VISION_PIPELINE_TIMEOUT_SECONDS must be greater than 0")
 
-    vision_pipeline_max_images = _int(env, "VISION_PIPELINE_MAX_IMAGES", 2)
+    vision_pipeline_multi_timeout_seconds = _float(
+        env, "VISION_PIPELINE_MULTI_TIMEOUT_SECONDS", 70.0
+    )
+    if vision_pipeline_multi_timeout_seconds <= 0:
+        raise ConfigError("VISION_PIPELINE_MULTI_TIMEOUT_SECONDS must be greater than 0")
+    if vision_pipeline_multi_timeout_seconds < vision_pipeline_timeout_seconds:
+        raise ConfigError(
+            "VISION_PIPELINE_MULTI_TIMEOUT_SECONDS must be greater than or equal to "
+            "VISION_PIPELINE_TIMEOUT_SECONDS"
+        )
+
+    vision_pipeline_max_images = _int(env, "VISION_PIPELINE_MAX_IMAGES", 4)
     if vision_pipeline_max_images < 1:
         raise ConfigError("VISION_PIPELINE_MAX_IMAGES must be greater than 0")
+
+    vision_pipeline_model_max_edge = _int(env, "VISION_PIPELINE_MODEL_MAX_EDGE", 1600)
+    if vision_pipeline_model_max_edge < 1:
+        raise ConfigError("VISION_PIPELINE_MODEL_MAX_EDGE must be greater than 0")
 
     vision_pipeline_cache_ttl_seconds = _int(
         env, "VISION_PIPELINE_CACHE_TTL_SECONDS", 86_400
@@ -226,6 +251,30 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     )
     if vision_pipeline_max_image_pixels < 1:
         raise ConfigError("VISION_PIPELINE_MAX_IMAGE_PIXELS must be greater than 0")
+
+    serpapi_lens_timeout_seconds = _float(env, "SERPAPI_LENS_TIMEOUT_SECONDS", 35.0)
+    if serpapi_lens_timeout_seconds <= 0:
+        raise ConfigError("SERPAPI_LENS_TIMEOUT_SECONDS must be greater than 0")
+
+    serpapi_poll_interval_seconds = _float(env, "SERPAPI_POLL_INTERVAL_SECONDS", 0.75)
+    if serpapi_poll_interval_seconds <= 0:
+        raise ConfigError("SERPAPI_POLL_INTERVAL_SECONDS must be greater than 0")
+
+    serpapi_lens_concurrency = _int(env, "SERPAPI_LENS_CONCURRENCY", 2)
+    if serpapi_lens_concurrency < 1:
+        raise ConfigError("SERPAPI_LENS_CONCURRENCY must be greater than 0")
+
+    serpapi_max_exact_fallbacks_per_message = _int(
+        env, "SERPAPI_MAX_EXACT_FALLBACKS_PER_MESSAGE", 2
+    )
+    if serpapi_max_exact_fallbacks_per_message < 0:
+        raise ConfigError("SERPAPI_MAX_EXACT_FALLBACKS_PER_MESSAGE must not be negative")
+
+    serpapi_max_web_fallbacks_per_message = _int(
+        env, "SERPAPI_MAX_WEB_FALLBACKS_PER_MESSAGE", 2
+    )
+    if serpapi_max_web_fallbacks_per_message < 0:
+        raise ConfigError("SERPAPI_MAX_WEB_FALLBACKS_PER_MESSAGE must not be negative")
 
     serpapi_timeout_seconds = _float(env, "SERPAPI_TIMEOUT_SECONDS", 8.0)
     if serpapi_timeout_seconds <= 0:
@@ -280,6 +329,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     )
     if vision_temp_store_backend != "r2":
         raise ConfigError("VISION_TEMP_STORE_BACKEND must be: r2")
+
+    vision_temp_publisher_enabled = _bool(env, "VISION_TEMP_PUBLISHER_ENABLED", False)
+    if vision_temp_publisher_enabled:
+        raise ConfigError(
+            "VISION_TEMP_PUBLISHER_ENABLED is not supported until an HTTPS publisher backend "
+            "is configured"
+        )
 
     raw_tts_ref_audio_path = env.get("TTS_REF_AUDIO_PATH", "").strip()
     persona_variant = env.get("PERSONA_VARIANT", "dialect").strip().lower() or "dialect"
@@ -370,17 +426,27 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         vision_model_enable_thinking=_bool(env, "VISION_MODEL_ENABLE_THINKING", False),
         vision_model_video_fps=vision_model_video_fps,
         vision_pipeline_timeout_seconds=vision_pipeline_timeout_seconds,
+        vision_pipeline_multi_timeout_seconds=vision_pipeline_multi_timeout_seconds,
         vision_pipeline_max_images=vision_pipeline_max_images,
+        vision_pipeline_model_max_edge=vision_pipeline_model_max_edge,
         vision_pipeline_cache_ttl_seconds=vision_pipeline_cache_ttl_seconds,
         vision_pipeline_max_download_bytes=vision_pipeline_max_download_bytes,
         vision_pipeline_max_image_pixels=vision_pipeline_max_image_pixels,
         serpapi_api_key=env.get("SERPAPI_API_KEY", "").strip(),
         serpapi_lens_enabled=_bool(env, "SERPAPI_LENS_ENABLED", True),
         serpapi_search_enabled=_bool(env, "SERPAPI_SEARCH_ENABLED", True),
+        serpapi_lens_timeout_seconds=serpapi_lens_timeout_seconds,
+        serpapi_poll_interval_seconds=serpapi_poll_interval_seconds,
+        serpapi_lens_concurrency=serpapi_lens_concurrency,
+        serpapi_exact_fallback_enabled=_bool(env, "SERPAPI_EXACT_FALLBACK_ENABLED", True),
+        serpapi_web_fallback_enabled=_bool(env, "SERPAPI_WEB_FALLBACK_ENABLED", True),
+        serpapi_max_exact_fallbacks_per_message=serpapi_max_exact_fallbacks_per_message,
+        serpapi_max_web_fallbacks_per_message=serpapi_max_web_fallbacks_per_message,
         serpapi_timeout_seconds=serpapi_timeout_seconds,
         serpapi_lens_exact_limit=serpapi_lens_exact_limit,
         serpapi_lens_visual_limit=serpapi_lens_visual_limit,
         serpapi_web_candidate_limit=serpapi_web_candidate_limit,
+        vision_temp_publisher_enabled=vision_temp_publisher_enabled,
         vision_temp_store_backend=vision_temp_store_backend,
         r2_account_id=env.get("R2_ACCOUNT_ID", "").strip(),
         r2_access_key_id=env.get("R2_ACCESS_KEY_ID", "").strip(),
