@@ -1,0 +1,13 @@
+{
+  "search_metadata": {
+    "id": "synthetic-exact-id",
+    "status": "Success"
+  },
+  "exact_matches": [
+    {
+      "title": "Synthetic exact source",
+      "link": "https://exact.example/source?ref=lens",
+      "source": "Exact Example"
+    }
+  ]
+}

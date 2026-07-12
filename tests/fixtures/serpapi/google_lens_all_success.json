@@ -1,0 +1,33 @@
+{
+  "search_metadata": {
+    "id": "synthetic-search-id",
+    "status": "Success"
+  },
+  "visual_matches": [
+    {
+      "title": "Synthetic character result",
+      "link": "https://visual.example/result-1?utm_source=lens",
+      "source": "Visual Example"
+    },
+    {
+      "title": "Synthetic series result",
+      "link": "https://visual.example/result-2",
+      "source": "Visual Example"
+    }
+  ],
+  "related_content": [
+    {
+      "title": "Synthetic related topic",
+      "link": "https://related.example/topic",
+      "source": "Related Example"
+    }
+  ],
+  "ai_overview": {
+    "text_blocks": [
+      {
+        "type": "paragraph",
+        "snippet": "Synthetic overview text for a fictional image."
+      }
+    ]
+  }
+}
