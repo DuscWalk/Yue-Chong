@@ -37,11 +37,13 @@ class ImagePreprocessor:
         timeout_seconds: float,
         max_download_bytes: int,
         max_image_pixels: int,
+        model_max_edge: int = 1600,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.max_download_bytes = max_download_bytes
         self.max_image_pixels = max_image_pixels
+        self.model_max_edge = model_max_edge
         self.transport = transport
 
     async def fetch(
@@ -110,16 +112,22 @@ class ImagePreprocessor:
                     raise ImagePreprocessError("image exceeds configured pixel limit")
                 image = ImageOps.exif_transpose(opened)
                 image.load()
-                image_format = (opened.format or "").upper()
+                if max(image.size) > self.model_max_edge:
+                    image.thumbnail(
+                        (self.model_max_edge, self.model_max_edge),
+                        Image.Resampling.LANCZOS,
+                    )
                 output = io.BytesIO()
-                if image_format == "JPEG" and image.mode in {"RGB", "L"}:
-                    image.save(output, format="JPEG", quality=90, optimize=True)
-                    content_type = "image/jpeg"
-                else:
-                    if image.mode not in {"RGB", "RGBA", "L", "LA"}:
-                        image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+                if self._has_transparency(image):
+                    if image.mode not in {"RGBA", "LA"}:
+                        image = image.convert("RGBA")
                     image.save(output, format="PNG", optimize=True)
                     content_type = "image/png"
+                else:
+                    if image.mode not in {"RGB", "L"}:
+                        image = image.convert("RGB")
+                    image.save(output, format="JPEG", quality=88, optimize=True)
+                    content_type = "image/jpeg"
                 normalized = output.getvalue()
                 return NormalizedImage(
                     content=normalized,
@@ -133,6 +141,15 @@ class ImagePreprocessor:
             raise
         except (UnidentifiedImageError, OSError) as exc:
             raise ImagePreprocessError("invalid image") from exc
+
+    @staticmethod
+    def _has_transparency(image: Image.Image) -> bool:
+        if "transparency" in image.info:
+            return True
+        if "A" not in image.getbands():
+            return False
+        alpha_minimum, _ = image.getchannel("A").getextrema()
+        return alpha_minimum < 255
 
     @staticmethod
     def _redacted_url(url: str) -> str:

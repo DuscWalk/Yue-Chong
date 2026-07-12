@@ -49,12 +49,12 @@ async def test_preprocessor_normalizes_and_hashes_image() -> None:
 
     image = await preprocessor.fetch("https://qq.test/image?id=secret#fragment")
 
-    assert image.content_type == "image/png"
+    assert image.content_type == "image/jpeg"
     assert image.width == 32
     assert image.height == 16
     assert len(image.sha256) == 64
     assert image.source_url == "https://qq.test/image"
-    assert image.data_url().startswith("data:image/png;base64,")
+    assert image.data_url().startswith("data:image/jpeg;base64,")
 
 
 @pytest.mark.asyncio
@@ -128,3 +128,97 @@ async def test_preprocessor_converts_jpeg_to_safe_normalized_bytes() -> None:
 
     assert image.content_type == "image/jpeg"
     assert image.content.startswith(b"\xff\xd8\xff")
+
+
+@pytest.mark.asyncio
+async def test_preprocessor_resizes_long_edge_without_enlarging_small_images() -> None:
+    large = ImagePreprocessor(
+        timeout_seconds=2,
+        max_download_bytes=20 * 1024 * 1024,
+        max_image_pixels=10_000_000,
+        model_max_edge=1600,
+        transport=transport_returning(image_bytes(width=2400, height=1200)),
+    )
+    small = ImagePreprocessor(
+        timeout_seconds=2,
+        max_download_bytes=1024 * 1024,
+        max_image_pixels=1_000_000,
+        model_max_edge=1600,
+        transport=transport_returning(image_bytes(width=800, height=400)),
+    )
+
+    large_image = await large.fetch("https://qq.test/large.png")
+    small_image = await small.fetch("https://qq.test/small.png")
+
+    assert (large_image.width, large_image.height) == (1600, 800)
+    assert (small_image.width, small_image.height) == (800, 400)
+
+
+@pytest.mark.asyncio
+async def test_preprocessor_applies_exif_orientation_before_resizing() -> None:
+    output = io.BytesIO()
+    source = Image.new("RGB", (80, 40), color=(10, 20, 30))
+    exif = source.getexif()
+    exif[274] = 6
+    source.save(output, format="JPEG", exif=exif)
+    preprocessor = ImagePreprocessor(
+        timeout_seconds=2,
+        max_download_bytes=1024 * 1024,
+        max_image_pixels=1_000_000,
+        model_max_edge=60,
+        transport=transport_returning(output.getvalue(), content_type="image/jpeg"),
+    )
+
+    image = await preprocessor.fetch("https://qq.test/oriented.jpg")
+
+    assert (image.width, image.height) == (30, 60)
+
+
+@pytest.mark.asyncio
+async def test_preprocessor_compresses_large_opaque_png_for_four_image_payload() -> None:
+    source = Image.effect_noise((1800, 1800), 80).convert("RGB")
+    output = io.BytesIO()
+    source.save(output, format="PNG")
+    original = output.getvalue()
+    preprocessor = ImagePreprocessor(
+        timeout_seconds=2,
+        max_download_bytes=20 * 1024 * 1024,
+        max_image_pixels=10_000_000,
+        model_max_edge=1600,
+        transport=transport_returning(original),
+    )
+
+    image = await preprocessor.fetch("https://qq.test/noise.png")
+
+    assert image.content_type == "image/jpeg"
+    assert len(image.content) * 4 < len(original) * 4
+    assert len(image.content) < 2_000_000
+
+
+@pytest.mark.asyncio
+async def test_preprocessor_keeps_alpha_as_png_and_hashes_decoded_pixels_stably() -> None:
+    transparent = Image.new("RGBA", (40, 20), color=(10, 20, 30, 120))
+    first = io.BytesIO()
+    second = io.BytesIO()
+    transparent.save(first, format="PNG", optimize=False)
+    transparent.save(second, format="PNG", optimize=True)
+
+    alpha_preprocessor = ImagePreprocessor(
+        timeout_seconds=2,
+        max_download_bytes=1024 * 1024,
+        max_image_pixels=1_000_000,
+        transport=transport_returning(first.getvalue()),
+    )
+    duplicate_preprocessor = ImagePreprocessor(
+        timeout_seconds=2,
+        max_download_bytes=1024 * 1024,
+        max_image_pixels=1_000_000,
+        transport=transport_returning(second.getvalue()),
+    )
+
+    first_image = await alpha_preprocessor.fetch("https://qq.test/alpha-a.png")
+    second_image = await duplicate_preprocessor.fetch("https://qq.test/alpha-b.png")
+
+    assert first_image.content_type == "image/png"
+    assert Image.open(io.BytesIO(first_image.content)).mode == "RGBA"
+    assert first_image.sha256 == second_image.sha256
