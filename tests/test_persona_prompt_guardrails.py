@@ -6,6 +6,58 @@ from qq_rolebot.policy import IncomingMessage
 from qq_rolebot.prompting import build_chat_messages
 from qq_rolebot.storage import MessageRecord
 
+OFFICIAL_VOICE_TITLES = [
+    "任命助理",
+    "交谈1",
+    "交谈2",
+    "交谈3",
+    "晋升后交谈1",
+    "晋升后交谈2",
+    "信赖提升后交谈1",
+    "信赖提升后交谈2",
+    "信赖提升后交谈3",
+    "闲置",
+    "干员报到",
+    "观看作战记录",
+    "精英化晋升1",
+    "精英化晋升2",
+    "编入队伍",
+    "任命队长",
+    "行动出发",
+    "行动开始",
+    "选中干员1",
+    "选中干员2",
+    "部署1",
+    "部署2",
+    "作战中1",
+    "作战中2",
+    "作战中3",
+    "作战中4",
+    "完成高难行动",
+    "3星结束行动",
+    "非3星结束行动",
+    "行动失败",
+    "进驻设施",
+    "戳一下",
+    "信赖触摸",
+    "标题",
+    "新年祝福",
+    "问候",
+    "生日",
+    "周年庆典",
+]
+
+
+def _official_voice_examples(persona) -> list[str]:
+    return [
+        example for example in persona.examples if example.startswith("官方原版语音台词-")
+    ]
+
+
+def _example_named(examples: list[str], title: str) -> str:
+    prefix = f"官方原版语音台词-{title}"
+    return next(example for example in examples if example.startswith(prefix))
+
 
 def test_load_persona_from_yaml(tmp_path: Path) -> None:
     path = tmp_path / "persona.yaml"
@@ -163,7 +215,7 @@ def test_default_dialect_examples_are_substantial_short_replies() -> None:
     replies = [
         "".join(example.splitlines()[1:]).strip()
         for example in persona.examples
-        if not example.startswith("语音台词")
+        if not example.startswith("官方原版语音台词-")
         if len(example.splitlines()) >= 2
     ]
 
@@ -211,6 +263,53 @@ def test_default_dialect_background_includes_arknights_world_context() -> None:
     assert "移动城市" in persona.background
     assert "龙门" in persona.background
     assert "乌萨斯" in persona.background
+
+
+def test_default_standard_persona_is_content_rich_and_preserves_mandarin_voice() -> None:
+    persona = load_persona(Path("personas/default.yaml"))
+    combined = "\n".join([persona.profile, persona.style, persona.background, persona.rules])
+    voice = _official_voice_examples(persona)
+
+    assert persona.language == "简体中文，普通话"
+    assert len(voice) == len(OFFICIAL_VOICE_TITLES)
+    assert [
+        item.split("\n", 1)[0]
+        .removeprefix("官方原版语音台词-")
+        .removesuffix("（中文）")
+        for item in voice
+    ] == OFFICIAL_VOICE_TITLES
+    assert "炎国" in combined
+    assert "玉门" in combined
+    assert "罗德岛" in combined
+    assert "槐天裴" in combined
+    assert "夕的画" in combined
+    assert "乡愁与乡愁蓝调音乐" in combined
+    assert "只输出重岳会说的话" in persona.rules
+    assert "让你来担任我的“录武官”？" in _example_named(persona.examples, "任命助理")
+    assert "胜败乃兵家常事，振作些。" in _example_named(persona.examples, "行动失败")
+
+
+def test_default_dialect_persona_is_content_rich_and_preserves_dialect_voice() -> None:
+    persona = load_persona(Path("personas/default_dialect.yaml"))
+    combined = "\n".join([persona.profile, persona.style, persona.background, persona.rules])
+    voice = _official_voice_examples(persona)
+
+    assert persona.language == "简体中文，武汉话口吻"
+    assert len(voice) == len(OFFICIAL_VOICE_TITLES)
+    assert [
+        item.split("\n", 1)[0]
+        .removeprefix("官方原版语音台词-")
+        .removesuffix("（中文-方言）")
+        for item in voice
+    ] == OFFICIAL_VOICE_TITLES
+    assert "么样" in combined
+    assert "晓得" in combined
+    assert "冒得" in combined
+    assert "玉门" in combined
+    assert "罗德岛" in combined
+    assert "十二位" in combined
+    assert "让你来担任我的“录武官”？" in _example_named(persona.examples, "任命助理")
+    assert "冒得关系。" in _example_named(persona.examples, "行动失败")
 
 
 def test_clean_response_trims_and_limits_length() -> None:
