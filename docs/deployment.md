@@ -111,8 +111,9 @@ FOLLOWUP_TRIGGER_KEYWORDS=你,你觉得,你看,怎么看,咋看,怎么样,如何
 ```
 
 Existing groups keep their stored probability in SQLite. Use `/bot prob N` in a group to change that group without editing `.env`.
-When `REPEAT_REPLY_ENABLED=true`, the bot can join a repeated-message chain after `REPEAT_REPLY_THRESHOLD` consecutive identical unaddressed group messages from at least two users. After it joins, the same text in the same group is cooled down for 10 minutes.
+When `REPEAT_REPLY_ENABLED=true`, the bot can join a repeated-message chain after `REPEAT_REPLY_THRESHOLD` consecutive identical unaddressed group messages from at least two users. After it joins, the same signature in the same group is cooled down for 10 minutes. Standard `face` and complete marketplace `mface` segments retain their format. Image segments are repeated only when OneBot provides an explicit subtype; subtype `1` and its summary are preserved, while ambiguous image segments are skipped instead of being sent as ordinary images.
 `CONTEXT_WINDOW_SECONDS` controls how far back model context can look. Successful bot replies are stored with user messages, and only records inside this window are included in the next prompt.
+Normal group replies quote the triggering user's message at most once per user every 60 seconds; additional replies during that window are sent as ordinary messages.
 
 Media replies:
 

@@ -92,14 +92,49 @@ def test_extract_repeat_media_prefers_face_id() -> None:
 
 
 def test_extract_repeat_media_reads_image_file_or_url() -> None:
-    message = [segment("image", file="abc.image", url="https://example.test/a.jpg")]
+    message = [
+        segment(
+            "image",
+            file="abc.image",
+            url="https://example.test/a.jpg",
+            sub_type=0,
+        )
+    ]
 
     media = message_segments.extract_repeat_media(message)
 
     assert media.kind == "image"
     assert media.file == "abc.image"
     assert media.url == "https://example.test/a.jpg"
+    assert media.image_sub_type == 0
     assert media.signature == "image:abc.image"
+
+
+def test_extract_repeat_media_preserves_custom_image_metadata() -> None:
+    message = [
+        segment(
+            "image",
+            file="custom.gif",
+            url="https://example.test/custom.gif",
+            sub_type=1,
+            summary="[动画表情]",
+        )
+    ]
+
+    media = message_segments.extract_repeat_media(message)
+
+    assert media.kind == "image"
+    assert media.image_sub_type == 1
+    assert media.summary == "[动画表情]"
+
+
+def test_extract_repeat_media_marks_image_without_subtype_as_ambiguous() -> None:
+    message = [segment("image", file="unknown.gif", url="https://example.test/unknown.gif")]
+
+    media = message_segments.extract_repeat_media(message)
+
+    assert media.kind == "image"
+    assert media.image_sub_type is None
 
 
 def test_extract_repeat_media_reads_mface_segment() -> None:

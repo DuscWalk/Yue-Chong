@@ -143,9 +143,10 @@ Reply rules:
 - Group message from a non-whitelisted group: ignore.
 - Group disabled or muted: ignore normal chat.
 - `@` bot or reply to bot: reply when the group is enabled.
+- Normal group replies quote the triggering user's message at most once per user every 60 seconds; additional replies during that window are sent as ordinary messages.
 - Context: user messages and successful bot replies are stored, but only messages within `CONTEXT_WINDOW_SECONDS` and not newer than the current message are included in the model prompt.
 - Follow-up window: after a user addresses the bot, their later message in the same group can trigger if it contains a question mark or one of `FOLLOWUP_TRIGGER_KEYWORDS`.
-- Repeat: if `REPEAT_REPLY_ENABLED=true`, the latest `REPEAT_REPLY_THRESHOLD` unaddressed group messages are identical, and at least two users joined the chain, reply with the same text.
+- Repeat: if `REPEAT_REPLY_ENABLED=true`, the latest `REPEAT_REPLY_THRESHOLD` unaddressed group messages are identical, and at least two users joined the chain, reply with the same text or supported media. `face`/complete `mface` metadata is preserved; typed image segments keep their subtype and summary, while ambiguous image segments are not re-sent as ordinary images.
 - Unknown OneBot segments such as `json` are ignored by text parsing; their diagnostic placeholder is never sent or repeated into the chat.
 - Keywords: if `KEYWORDS` appears in text, reply.
 - Random: if group random probability passes, reply.

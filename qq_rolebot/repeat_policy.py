@@ -22,6 +22,7 @@ class RepeatEntry:
     media_emoji_package_id: str = ""
     media_key: str = ""
     media_summary: str = ""
+    media_image_sub_type: int | None = None
 
 
 class RepeatTracker:
@@ -80,6 +81,7 @@ class RepeatTracker:
             media_emoji_package_id=message.repeat_media_emoji_package_id,
             media_key=message.repeat_media_key,
             media_summary=message.repeat_media_summary,
+            media_image_sub_type=message.repeat_media_image_sub_type,
         )
 
     @staticmethod
@@ -90,11 +92,21 @@ class RepeatTracker:
     @staticmethod
     def _reply(entry: RepeatEntry) -> OutgoingReply | None:
         if entry.media_kind == "image":
+            if entry.media_image_sub_type is None:
+                return None
             value = entry.media_file or entry.media_url
             if value:
                 return OutgoingReply(
                     source="repeat",
-                    messages=[OutgoingMessage(kind="image", file=value, source="repeat")],
+                    messages=[
+                        OutgoingMessage(
+                            kind="image",
+                            file=value,
+                            image_sub_type=entry.media_image_sub_type,
+                            summary=entry.media_summary,
+                            source="repeat",
+                        )
+                    ],
                 )
         if entry.media_kind == "face" and entry.media_face_id:
             return OutgoingReply(
@@ -118,12 +130,7 @@ class RepeatTracker:
                         )
                     ],
                 )
-            value = entry.media_file or entry.media_url
-            if value:
-                return OutgoingReply(
-                    source="repeat",
-                    messages=[OutgoingMessage(kind="image", file=value, source="repeat")],
-                )
+            return None
         if entry.text:
             return OutgoingReply.text(entry.text, source="repeat")
         return None

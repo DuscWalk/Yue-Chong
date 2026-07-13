@@ -36,6 +36,7 @@ class IncomingMessage:
     repeat_media_emoji_package_id: str = ""
     repeat_media_key: str = ""
     repeat_media_summary: str = ""
+    repeat_media_image_sub_type: int | None = None
     repeat_signature: str = ""
 
 

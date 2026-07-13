@@ -16,6 +16,7 @@ def msg(
     emoji_package_id: str = "",
     key: str = "",
     summary: str = "",
+    image_sub_type: int | None = None,
 ) -> IncomingMessage:
     return IncomingMessage(
         group_id=20,
@@ -33,6 +34,7 @@ def msg(
         repeat_media_emoji_package_id=emoji_package_id,
         repeat_media_key=key,
         repeat_media_summary=summary,
+        repeat_media_image_sub_type=image_sub_type,
     )
 
 
@@ -57,6 +59,7 @@ def test_repeat_tracker_repeats_image_without_persisting_file() -> None:
         repeat_signature="image:a.jpg",
         media_kind="image",
         media_file="a.jpg",
+        image_sub_type=0,
     )
     second = msg(
         "[image: a.jpg]",
@@ -65,6 +68,7 @@ def test_repeat_tracker_repeats_image_without_persisting_file() -> None:
         repeat_signature="image:a.jpg",
         media_kind="image",
         media_file="a.jpg",
+        image_sub_type=0,
     )
 
     assert tracker.record_and_match(first, now=100) is None
@@ -73,6 +77,50 @@ def test_repeat_tracker_repeats_image_without_persisting_file() -> None:
     assert reply is not None
     assert reply.messages[0].kind == "image"
     assert reply.messages[0].file == "a.jpg"
+    assert reply.messages[0].image_sub_type == 0
+
+
+def test_repeat_tracker_preserves_custom_image_metadata() -> None:
+    tracker = RepeatTracker(threshold=2)
+    kwargs = {
+        "repeat_signature": "image:custom.gif",
+        "media_kind": "image",
+        "media_file": "custom.gif",
+        "summary": "[动画表情]",
+        "image_sub_type": 1,
+    }
+
+    tracker.record_and_match(
+        msg("[image: custom.gif]", sender=1, created_at=100, **kwargs),
+        now=100,
+    )
+    reply = tracker.record_and_match(
+        msg("[image: custom.gif]", sender=2, created_at=101, **kwargs),
+        now=101,
+    )
+
+    assert reply is not None
+    assert reply.messages[0].kind == "image"
+    assert reply.messages[0].image_sub_type == 1
+    assert reply.messages[0].summary == "[动画表情]"
+
+
+def test_repeat_tracker_skips_ambiguous_image_media() -> None:
+    tracker = RepeatTracker(threshold=2)
+    kwargs = {
+        "repeat_signature": "image:unknown.gif",
+        "media_kind": "image",
+        "media_file": "unknown.gif",
+    }
+
+    assert tracker.record_and_match(
+        msg("[image: unknown.gif]", sender=1, created_at=100, **kwargs),
+        now=100,
+    ) is None
+    assert tracker.record_and_match(
+        msg("[image: unknown.gif]", sender=2, created_at=101, **kwargs),
+        now=101,
+    ) is None
 
 
 def test_repeat_tracker_repeats_face() -> None:

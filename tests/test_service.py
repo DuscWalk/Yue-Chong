@@ -464,6 +464,7 @@ async def test_service_handle_reply_repeats_image_without_model(tmp_path: Path) 
         created_at=100,
         repeat_media_kind="image",
         repeat_media_file="a.jpg",
+        repeat_media_image_sub_type=0,
         repeat_signature="image:a.jpg",
     )
     second = IncomingMessage(
@@ -475,6 +476,7 @@ async def test_service_handle_reply_repeats_image_without_model(tmp_path: Path) 
         created_at=101,
         repeat_media_kind="image",
         repeat_media_file="a.jpg",
+        repeat_media_image_sub_type=0,
         repeat_signature="image:a.jpg",
     )
 
