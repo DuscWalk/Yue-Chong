@@ -39,26 +39,92 @@ def test_roleplay_plugin_imports(monkeypatch) -> None:
     assert hasattr(module, "extract_message_text")
 
 
-def test_plugin_requires_complete_vision_provider_settings(monkeypatch) -> None:
+def test_plugin_requires_only_complete_qwen_vision_settings(monkeypatch) -> None:
     set_env(monkeypatch)
     module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
     complete = replace(
         module.settings,
+        vision_model_enabled=True,
         vision_model_api_base="https://vision.test/v1",
         vision_model_api_key="vision-key",
         vision_model_name="vision-model",
         serpapi_api_key="serp-key",
-        r2_account_id="account",
-        r2_access_key_id="access",
-        r2_secret_access_key="secret",
-        r2_bucket="bucket",
     )
 
     assert module.vision_settings_complete(complete) is True
-    assert module.vision_settings_complete(replace(complete, serpapi_api_key="")) is False
-    assert module.vision_settings_complete(replace(complete, r2_bucket="")) is False
-    assert module.vision_settings_complete(replace(complete, serpapi_lens_enabled=False)) is False
-    assert module.vision_settings_complete(replace(complete, serpapi_search_enabled=False)) is False
+    assert module.vision_settings_complete(replace(complete, serpapi_api_key="")) is True
+    assert module.vision_settings_complete(replace(complete, r2_bucket="")) is True
+    assert module.vision_settings_complete(replace(complete, vision_model_api_key="")) is False
+
+
+def test_plugin_builds_optional_lens_and_web_clients(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    complete = replace(
+        module.settings,
+        vision_model_enabled=True,
+        vision_model_api_base="https://vision.test/v1",
+        vision_model_api_key="vision-key",
+        vision_model_name="vision-model",
+        serpapi_api_key="serp-key",
+        serpapi_lens_enabled=True,
+        serpapi_search_enabled=True,
+        serpapi_web_fallback_enabled=True,
+    )
+
+    pipeline, cache = module.build_vision_pipeline(complete)
+
+    assert pipeline is not None
+    assert cache is not None
+    assert pipeline.lens_client is not None
+    assert pipeline.web_client is not None
+    assert pipeline.total_timeout_seconds == 50
+    assert pipeline.multi_timeout_seconds == 70
+    assert pipeline.max_images == 4
+    assert pipeline._lens_semaphore._value == 2
+    asyncio.run(pipeline.close())
+
+
+def test_plugin_degrades_to_qwen_only_without_serpapi(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    qwen_only = replace(
+        module.settings,
+        vision_model_enabled=True,
+        vision_model_api_base="https://vision.test/v1",
+        vision_model_api_key="vision-key",
+        vision_model_name="vision-model",
+        serpapi_api_key="",
+    )
+
+    pipeline, _ = module.build_vision_pipeline(qwen_only)
+
+    assert pipeline is not None
+    assert pipeline.lens_client is None
+    assert pipeline.web_client is None
+    asyncio.run(pipeline.close())
+
+
+def test_plugin_search_switch_disables_only_web_fallback(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    settings = replace(
+        module.settings,
+        vision_model_enabled=True,
+        vision_model_api_base="https://vision.test/v1",
+        vision_model_api_key="vision-key",
+        vision_model_name="vision-model",
+        serpapi_api_key="serp-key",
+        serpapi_lens_enabled=True,
+        serpapi_search_enabled=False,
+    )
+
+    pipeline, _ = module.build_vision_pipeline(settings)
+
+    assert pipeline is not None
+    assert pipeline.lens_client is not None
+    assert pipeline.web_client is None
+    asyncio.run(pipeline.close())
 
 
 def test_render_outgoing_message_renders_mface(monkeypatch) -> None:

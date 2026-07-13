@@ -7,12 +7,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from qq_rolebot.debug_trace import DebugTrace
-from qq_rolebot.vision_client import VisualAnalysis
+from qq_rolebot.image_preprocessor import NormalizedImage
 from qq_rolebot.vision_types import (
     ConfidenceBand,
-    LensEvidence,
+    ExactSearchResult,
+    ImageDecision,
+    ImageFallbackEvidence,
+    ImageLensResult,
+    LensSearchResult,
     VisionObservation,
-    VisionResolution,
+    VisionSynthesis,
 )
 
 
@@ -20,9 +24,16 @@ from qq_rolebot.vision_types import (
 class VisionPipelineResult:
     ok: bool
     context_text: str
-    resolutions: tuple[VisionResolution, ...] = ()
+    synthesis: VisionSynthesis = VisionSynthesis()
     timed_out: bool = False
     error: str = ""
+
+
+@dataclass(frozen=True)
+class _PreparedImage:
+    image_number: int
+    source_url: str
+    image: NormalizedImage
 
 
 class VisionPipeline:
@@ -31,30 +42,49 @@ class VisionPipeline:
         *,
         preprocessor: Any,
         analyzer: Any,
-        lens_client: Any,
-        web_client: Any,
-        temp_store: Any,
-        resolver: Any,
+        lens_client: Any | None,
+        web_client: Any | None,
         cache: Any,
         total_timeout_seconds: float,
+        multi_timeout_seconds: float,
+        lens_timeout_seconds: float,
+        model_timeout_seconds: float,
+        lens_concurrency: int,
         max_images: int,
-        web_candidate_limit: int,
-        cache_version: str,
+        exact_fallback_enabled: bool,
+        web_fallback_enabled: bool,
+        max_exact_fallbacks: int,
+        max_web_fallbacks: int,
+        model_name: str,
+        prompt_version: str,
+        lens_parser_version: str,
+        schema_version: str,
         now: Callable[[], int] | None = None,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         self.preprocessor = preprocessor
         self.analyzer = analyzer
         self.lens_client = lens_client
         self.web_client = web_client
-        self.temp_store = temp_store
-        self.resolver = resolver
         self.cache = cache
         self.total_timeout_seconds = total_timeout_seconds
+        self.multi_timeout_seconds = multi_timeout_seconds
+        self.lens_timeout_seconds = lens_timeout_seconds
+        self.model_timeout_seconds = model_timeout_seconds
         self.max_images = max_images
-        self.web_candidate_limit = web_candidate_limit
-        self.cache_version = cache_version
+        self.exact_fallback_enabled = exact_fallback_enabled
+        self.web_fallback_enabled = web_fallback_enabled
+        self.max_exact_fallbacks = max_exact_fallbacks
+        self.max_web_fallbacks = max_web_fallbacks
+        self.model_name = model_name
+        self.prompt_version = prompt_version
+        self.lens_parser_version = lens_parser_version
+        self.schema_version = schema_version
         self.now = now or (lambda: int(time.time()))
-        self._cleanup_tasks: set[asyncio.Task[None]] = set()
+        self.monotonic = monotonic or time.monotonic
+        self._lens_semaphore = asyncio.Semaphore(lens_concurrency)
+        self._inflight_lock = asyncio.Lock()
+        self._inflight_lens: dict[str, asyncio.Task[LensSearchResult]] = {}
 
     async def describe(
         self,
@@ -65,357 +95,438 @@ class VisionPipeline:
         chat_context: str,
         trace: DebugTrace | None = None,
     ) -> VisionPipelineResult:
-        selected_images = [
-            url for url in image_urls if url.startswith(("http://", "https://"))
-        ][: self.max_images]
+        valid_images = [url for url in image_urls if url.startswith(("http://", "https://"))]
+        selected_images = valid_images[: self.max_images]
+        overflow_count = max(0, len(valid_images) - len(selected_images))
         selected_videos = [
             url for url in (video_urls or []) if url.startswith(("http://", "https://"))
         ][: self.max_images]
         if not selected_images and not selected_videos:
             return VisionPipelineResult(ok=False, context_text="", error="no media urls")
 
-        started = time.monotonic()
-        deadline = started + self.total_timeout_seconds
-        image_tasks = [
-            asyncio.create_task(
-                self._process_image(
-                    url,
-                    user_question=user_question,
-                    chat_context=chat_context,
-                    deadline=deadline,
-                    trace=trace,
-                )
-            )
-            for url in selected_images
-        ]
+        started = self.monotonic()
+        total_timeout = (
+            self.multi_timeout_seconds if len(selected_images) >= 3 else self.total_timeout_seconds
+        )
+        deadline = started + total_timeout
         dynamic_task = (
             asyncio.create_task(
-                self.analyzer.describe_dynamic_media(
+                self._describe_dynamic(
                     selected_videos,
                     user_question=user_question,
+                    deadline=deadline,
                     trace=trace,
-                    timeout_seconds=self._remaining(deadline),
                 )
             )
             if selected_videos
             else None
         )
         timed_out = False
-        resolutions: tuple[VisionResolution, ...] = ()
-        dynamic_observation = VisionObservation()
         try:
-            async with asyncio.timeout(self.total_timeout_seconds):
-                if image_tasks:
-                    resolutions = tuple(await asyncio.gather(*image_tasks))
-                if dynamic_task is not None:
-                    dynamic_observation = await dynamic_task
+            synthesis = await self._describe_static(
+                selected_images,
+                user_question=user_question,
+                chat_context=chat_context,
+                started=started,
+                deadline=deadline,
+                trace=trace,
+            )
         except TimeoutError:
             timed_out = True
-            for task in image_tasks:
-                task.cancel()
-            if dynamic_task is not None:
-                dynamic_task.cancel()
-            await asyncio.gather(*image_tasks, return_exceptions=True)
-            if dynamic_task is not None:
-                await asyncio.gather(dynamic_task, return_exceptions=True)
-            ordered: list[VisionResolution] = []
-            for task in image_tasks:
-                if task.done() and not task.cancelled() and task.exception() is None:
-                    ordered.append(task.result())
-                else:
-                    ordered.append(
-                        VisionResolution.uncertain(
-                            observation=VisionObservation(),
-                            reason="识图总预算已用尽",
-                        )
-                    )
-            resolutions = tuple(ordered)
-        except Exception as exc:
-            for task in image_tasks:
-                task.cancel()
-            if dynamic_task is not None:
-                dynamic_task.cancel()
-            await asyncio.gather(*image_tasks, return_exceptions=True)
-            if dynamic_task is not None:
-                await asyncio.gather(dynamic_task, return_exceptions=True)
-            resolutions = tuple(
-                VisionResolution.unavailable(
-                    observation=VisionObservation(),
-                    reason=self._exception_text(exc),
-                )
-                for _ in selected_images
-            )
+            synthesis = self._unavailable_synthesis(len(selected_images))
+        except Exception:
+            synthesis = self._unavailable_synthesis(len(selected_images))
 
-        context_parts = [
-            resolution.to_context_text(image_number=index)
-            for index, resolution in enumerate(resolutions, start=1)
-        ]
+        dynamic = VisionObservation()
+        if dynamic_task is not None:
+            try:
+                dynamic = await asyncio.wait_for(
+                    dynamic_task,
+                    timeout=self._remaining(deadline),
+                )
+            except (TimeoutError, Exception):
+                dynamic_task.cancel()
+                await asyncio.gather(dynamic_task, return_exceptions=True)
+
+        context_parts = [synthesis.to_context_text()] if synthesis.images else []
         if selected_videos:
-            description = dynamic_observation.scene_description or "无法可靠描述动态媒体。"
+            description = dynamic.scene_description or "无法可靠描述动态媒体。"
             context_parts.append(
                 "动态媒体：\n"
                 f"视觉观察：{description}\n"
-                "身份判断：动态媒体首版只提供客观描述，不确认具体身份。"
+                "身份判断：动态媒体只提供客观描述，不确认具体身份。"
             )
-        context_text = "\n\n".join(context_parts)
+        if overflow_count:
+            context_parts.append(f"另有 {overflow_count} 张图片未进入识图。")
+        context_text = "\n\n".join(part for part in context_parts if part)
         if trace is not None:
             trace.event(
                 "vision.pipeline.result",
                 {
                     "ok": bool(context_text),
                     "timed_out": timed_out,
-                    "image_count": len(resolutions),
+                    "image_count": len(selected_images),
                     "video_count": len(selected_videos),
-                    "elapsed_ms": round((time.monotonic() - started) * 1000),
-                    "confirmed_count": sum(
-                        item.confidence is ConfidenceBand.CONFIRMED for item in resolutions
-                    ),
+                    "elapsed_ms": round((self.monotonic() - started) * 1000),
                 },
             )
         return VisionPipelineResult(
             ok=bool(context_text),
             context_text=context_text,
-            resolutions=resolutions,
+            synthesis=synthesis,
             timed_out=timed_out,
         )
 
     async def close(self) -> None:
-        if self._cleanup_tasks:
-            await asyncio.gather(*tuple(self._cleanup_tasks), return_exceptions=True)
+        tasks = tuple(self._inflight_lens.values())
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        clients = [self.analyzer, self.lens_client, self.web_client]
+        for client in clients:
+            close = getattr(client, "close", None)
+            if close is not None:
+                await close()
 
-    async def _process_image(
+    async def _describe_static(
         self,
-        url: str,
+        image_urls: list[str],
         *,
         user_question: str,
         chat_context: str,
+        started: float,
         deadline: float,
         trace: DebugTrace | None,
-    ) -> VisionResolution:
-        image = await self.preprocessor.fetch(
-            url,
-            trace=trace,
-            timeout_seconds=self._remaining(deadline),
-        )
-        cached = await self.cache.get_resolution(
-            image.sha256,
-            version=self.cache_version,
-            now=self.now(),
-        )
-        if cached is not None:
-            if trace is not None:
-                trace.event("vision.cache.hit", {"stage": "resolution"})
-            return cached
-
-        cached_observation, cached_lens = await asyncio.gather(
-            self.cache.get_observation(
-                image.sha256,
-                version=self.cache_version,
-                now=self.now(),
-            ),
-            self.cache.get_lens(
-                image.sha256,
-                version=self.cache_version,
-                now=self.now(),
-            ),
-        )
-        visual_task = (
-            asyncio.create_task(
-                self.analyzer.analyze_image(
-                    image,
-                    user_question=user_question,
-                    chat_context=chat_context,
-                    trace=trace,
-                    timeout_seconds=self._remaining(deadline),
-                )
+    ) -> VisionSynthesis:
+        if not image_urls:
+            return VisionSynthesis()
+        prepared_results = await asyncio.gather(
+            *(
+                self._prepare_image(index, url, deadline=deadline, trace=trace)
+                for index, url in enumerate(image_urls, start=1)
             )
-            if cached_observation is None
-            else None
         )
-        publish_task = (
-            asyncio.create_task(self.temp_store.publish(image, trace=trace))
-            if cached_lens is None
-            else None
+        prepared = tuple(item for item in prepared_results if item is not None)
+        image_hashes = tuple(
+            next(
+                (
+                    item.image.sha256
+                    for item in prepared
+                    if item.image_number == image_number
+                ),
+                f"unavailable-{image_number}",
+            )
+            for image_number in range(1, len(image_urls) + 1)
         )
-        lens_task = (
-            asyncio.create_task(
-                self.lens_client.search(
+        synthesis_key = self.cache.build_synthesis_key(
+            image_hashes=image_hashes,
+            user_question=user_question,
+            chat_context=chat_context,
+            model_name=self.model_name,
+            prompt_version=self.prompt_version,
+            lens_parser_version=self.lens_parser_version,
+            schema_version=self.schema_version,
+        )
+        cached_synthesis = await self.cache.get_synthesis(synthesis_key, now=self.now())
+        if cached_synthesis is not None:
+            return cached_synthesis
+        if not prepared:
+            return self._unavailable_synthesis(len(image_urls))
+
+        is_multi = len(image_urls) >= 3
+        reserve = self.model_timeout_seconds if is_multi else min(self.model_timeout_seconds, 15.0)
+        lens_stage_deadline = min(started + self.lens_timeout_seconds, deadline - reserve)
+        unique: dict[str, _PreparedImage] = {}
+        for item in prepared:
+            unique.setdefault(item.image.sha256, item)
+        lens_by_hash = await self._lens_results(
+            unique,
+            stage_deadline=lens_stage_deadline,
+            trace=trace,
+        )
+        lens_results = tuple(
+            ImageLensResult(
+                image_number=item.image_number,
+                search=lens_by_hash.get(
+                    item.image.sha256,
+                    LensSearchResult(ok=False, error="Lens unavailable"),
+                ),
+            )
+            for item in prepared
+        )
+        synthesis = await asyncio.wait_for(
+            self.analyzer.synthesize(
+                tuple(item.image for item in prepared),
+                lens_results,
+                user_question=user_question,
+                chat_context=chat_context,
+                timeout_seconds=min(self.model_timeout_seconds, self._remaining(deadline)),
+                trace=trace,
+            ),
+            timeout=self._remaining(deadline),
+        )
+        synthesis = self._restore_positions(synthesis, len(image_urls))
+        synthesis = await self._run_fallbacks(
+            synthesis,
+            prepared=prepared,
+            deadline=deadline,
+            trace=trace,
+        )
+        if any(item.confidence is not ConfidenceBand.UNAVAILABLE for item in synthesis.images):
+            await self.cache.put_synthesis(synthesis_key, synthesis=synthesis, now=self.now())
+        return synthesis
+
+    async def _prepare_image(
+        self,
+        image_number: int,
+        url: str,
+        *,
+        deadline: float,
+        trace: DebugTrace | None,
+    ) -> _PreparedImage | None:
+        try:
+            image = await asyncio.wait_for(
+                self.preprocessor.fetch(
                     url,
                     trace=trace,
                     timeout_seconds=self._remaining(deadline),
-                )
+                ),
+                timeout=self._remaining(deadline),
             )
-            if cached_lens is None
-            else None
-        )
-        handle = None
-        publication_detached = False
-        try:
-            if visual_task is not None:
-                visual = await visual_task
-                if not visual.error:
-                    await self.cache.put_observation(
-                        image.sha256,
-                        version=self.cache_version,
-                        observation=visual.observation,
-                        now=self.now(),
-                    )
-            else:
-                visual = VisualAnalysis(observation=cached_observation or VisionObservation())
+        except Exception:
+            return None
+        return _PreparedImage(image_number=image_number, source_url=url, image=image)
 
-            if lens_task is None:
-                lens = cached_lens or LensEvidence()
-            else:
-                lens_result = await lens_task
-                if lens_result.ok:
-                    lens = lens_result.evidence
-                    if publish_task is not None:
-                        self._schedule_publication_cleanup(publish_task)
-                        publication_detached = True
-                elif lens_result.unreachable and self._remaining(deadline) > 0:
-                    if publish_task is None:
-                        lens = LensEvidence()
-                    else:
-                        handle = await publish_task
-                        retry = await self.lens_client.search(
-                            handle.url,
-                            trace=trace,
-                            timeout_seconds=self._remaining(deadline),
-                        )
-                        lens = retry.evidence if retry.ok else LensEvidence()
-                else:
-                    lens = LensEvidence()
-                    if publish_task is not None:
-                        self._schedule_publication_cleanup(publish_task)
-                        publication_detached = True
-                if lens.exact_matches or lens.visual_matches:
-                    await self.cache.put_lens(
-                        image.sha256,
-                        version=self.cache_version,
-                        lens=lens,
-                        now=self.now(),
-                    )
+    async def _lens_results(
+        self,
+        unique: dict[str, _PreparedImage],
+        *,
+        stage_deadline: float,
+        trace: DebugTrace | None,
+    ) -> dict[str, LensSearchResult]:
+        results: dict[str, LensSearchResult] = {}
 
-            lens_candidates = await self.analyzer.extract_search_candidates(
-                lens,
-                observation=visual.observation,
-                user_question=user_question,
-                trace=trace,
-                timeout_seconds=self._remaining(deadline),
-            )
-            candidates = (*visual.candidates, *lens_candidates)
-            selected = self.resolver.select_web_candidates(
-                tuple(candidates),
-                lens,
-                limit=self.web_candidate_limit,
-            )
-            web_evidence = ()
-            if selected and self._remaining(deadline) > 0:
-                web_evidence = tuple(
-                    await asyncio.gather(
-                        *[
-                            self.web_client.verify(
-                                candidate,
-                                visual_features=visual.observation.distinctive_features,
-                                trace=trace,
-                                timeout_seconds=self._remaining(deadline),
-                            )
-                            for candidate in selected
-                        ]
-                    )
-                )
-            decision = self.resolver.resolve(
-                observation=visual.observation,
-                visual_candidates=tuple(candidates),
-                lens=lens,
-                web_evidence=web_evidence,
-            )
-            await self.cache.put_resolution(
-                image.sha256,
-                version=self.cache_version,
-                resolution=decision.resolution,
+        async def resolve(image_hash: str, item: _PreparedImage) -> None:
+            cached = await self.cache.get_lens_all(
+                image_hash,
+                version=self.lens_parser_version,
                 now=self.now(),
             )
-            if trace is not None:
-                trace.event(
-                    "vision.resolver.result",
-                    {
-                        "rule_id": decision.rule_id,
-                        "confidence": decision.resolution.confidence.value,
-                    },
+            if cached is not None:
+                results[image_hash] = cached
+                return
+            if self.lens_client is None or self.monotonic() >= stage_deadline:
+                results[image_hash] = LensSearchResult(ok=False, error="Lens unavailable")
+                return
+            try:
+                results[image_hash] = await asyncio.wait_for(
+                    asyncio.shield(
+                        await self._inflight_lens_task(
+                            image_hash,
+                            item.source_url,
+                            timeout_seconds=min(
+                                self.lens_timeout_seconds,
+                                self._remaining(stage_deadline),
+                            ),
+                            trace=trace,
+                        )
+                    ),
+                    timeout=self._remaining(stage_deadline),
                 )
-            return decision.resolution
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            observation = VisionObservation()
-            if visual_task is not None and visual_task.done() and not visual_task.cancelled():
-                try:
-                    observation = visual_task.result().observation
-                except Exception:
-                    pass
-            return VisionResolution.unavailable(
-                observation=observation,
-                reason=self._exception_text(exc),
-            )
+            except TimeoutError:
+                results[image_hash] = LensSearchResult(ok=False, error="Lens stage deadline")
+
+        await asyncio.gather(*(resolve(image_hash, item) for image_hash, item in unique.items()))
+        return results
+
+    async def _inflight_lens_task(
+        self,
+        image_hash: str,
+        source_url: str,
+        *,
+        timeout_seconds: float,
+        trace: DebugTrace | None,
+    ) -> asyncio.Task[LensSearchResult]:
+        async with self._inflight_lock:
+            task = self._inflight_lens.get(image_hash)
+            if task is None:
+                task = asyncio.create_task(
+                    self._run_lens(
+                        image_hash,
+                        source_url,
+                        timeout_seconds=timeout_seconds,
+                        trace=trace,
+                    )
+                )
+                self._inflight_lens[image_hash] = task
+            return task
+
+    async def _run_lens(
+        self,
+        image_hash: str,
+        source_url: str,
+        *,
+        timeout_seconds: float,
+        trace: DebugTrace | None,
+    ) -> LensSearchResult:
+        try:
+            async with self._lens_semaphore:
+                result = await self.lens_client.search_all(
+                    source_url,
+                    timeout_seconds=timeout_seconds,
+                    trace=trace,
+                )
+            if result.ok:
+                await self.cache.put_lens_all(
+                    image_hash,
+                    version=self.lens_parser_version,
+                    result=result,
+                    now=self.now(),
+                )
+            return result
         finally:
-            if (
-                publish_task is not None
-                and not publication_detached
-                and handle is None
-                and publish_task.done()
-                and not publish_task.cancelled()
-            ):
-                try:
-                    handle = publish_task.result()
-                except Exception:
-                    handle = None
-            if (
-                publish_task is not None
-                and not publication_detached
-                and not publish_task.done()
-            ):
-                publish_task.cancel()
-                await asyncio.gather(publish_task, return_exceptions=True)
-            if handle is not None:
-                self._schedule_cleanup(handle)
-            for task in (visual_task, lens_task):
-                if task is not None and not task.done():
-                    task.cancel()
-            await asyncio.gather(
-                *(task for task in (visual_task, lens_task) if task is not None),
-                return_exceptions=True,
+            async with self._inflight_lock:
+                if self._inflight_lens.get(image_hash) is asyncio.current_task():
+                    self._inflight_lens.pop(image_hash, None)
+
+    async def _run_fallbacks(
+        self,
+        synthesis: VisionSynthesis,
+        *,
+        prepared: tuple[_PreparedImage, ...],
+        deadline: float,
+        trace: DebugTrace | None,
+    ) -> VisionSynthesis:
+        by_number = {item.image_number: item for item in prepared}
+        exact_requests = [
+            item
+            for item in synthesis.images
+            if item.needs_exact and item.image_number in by_number
+        ][: self.max_exact_fallbacks]
+        web_requests = [
+            item
+            for item in synthesis.images
+            if item.needs_web and item.verification_query
+        ][: self.max_web_fallbacks]
+        jobs = []
+        if self.exact_fallback_enabled and self.lens_client is not None:
+            jobs.extend(
+                self._exact_fallback(item, by_number[item.image_number], deadline, trace)
+                for item in exact_requests
             )
-
-    def _schedule_cleanup(self, handle: Any) -> None:
-        task = asyncio.create_task(self._delete_handle(handle))
-        self._cleanup_tasks.add(task)
-        task.add_done_callback(self._cleanup_tasks.discard)
-
-    def _schedule_publication_cleanup(self, publish_task: asyncio.Task[Any]) -> None:
-        task = asyncio.create_task(self._finish_publication_cleanup(publish_task))
-        self._cleanup_tasks.add(task)
-        task.add_done_callback(self._cleanup_tasks.discard)
-
-    @classmethod
-    async def _finish_publication_cleanup(cls, publish_task: asyncio.Task[Any]) -> None:
+        if self.web_fallback_enabled and self.web_client is not None:
+            jobs.extend(self._web_fallback(item, deadline, trace) for item in web_requests)
+        if not jobs or self.monotonic() >= deadline:
+            return synthesis
         try:
-            handle = await publish_task
+            results = await asyncio.gather(*jobs)
         except Exception:
-            return
-        await cls._delete_handle(handle)
-
-    @staticmethod
-    async def _delete_handle(handle: Any) -> None:
+            return synthesis
+        grouped: dict[int, ImageFallbackEvidence] = {}
+        for image_number, kind, sources, error in results:
+            current = grouped.get(image_number, ImageFallbackEvidence(image_number))
+            if kind == "exact":
+                grouped[image_number] = ImageFallbackEvidence(
+                    image_number,
+                    exact_sources=sources,
+                    web_sources=current.web_sources,
+                    exact_error=error,
+                    web_error=current.web_error,
+                )
+            else:
+                grouped[image_number] = ImageFallbackEvidence(
+                    image_number,
+                    exact_sources=current.exact_sources,
+                    web_sources=sources,
+                    exact_error=current.exact_error,
+                    web_error=error,
+                )
         try:
-            await asyncio.shield(handle.delete())
+            return await asyncio.wait_for(
+                self.analyzer.reevaluate(
+                    synthesis,
+                    tuple(grouped.values()),
+                    timeout_seconds=min(self.model_timeout_seconds, self._remaining(deadline)),
+                    trace=trace,
+                ),
+                timeout=self._remaining(deadline),
+            )
         except Exception:
-            return
+            return synthesis
+
+    async def _exact_fallback(self, decision, prepared, deadline, trace):
+        cached = await self.cache.get_exact(
+            prepared.image.sha256,
+            version=self.lens_parser_version,
+            now=self.now(),
+        )
+        if cached is None:
+            try:
+                cached = await asyncio.wait_for(
+                    self.lens_client.search_exact(
+                        prepared.source_url,
+                        timeout_seconds=self._remaining(deadline),
+                        trace=trace,
+                    ),
+                    timeout=self._remaining(deadline),
+                )
+            except Exception:
+                cached = ExactSearchResult(ok=False, error="exact unavailable")
+            if cached.ok:
+                await self.cache.put_exact(
+                    prepared.image.sha256,
+                    version=self.lens_parser_version,
+                    result=cached,
+                    now=self.now(),
+                )
+        return decision.image_number, "exact", cached.sources, cached.error
+
+    async def _web_fallback(self, decision, deadline, trace):
+        try:
+            sources = await asyncio.wait_for(
+                self.web_client.search(
+                    decision.verification_query,
+                    timeout_seconds=self._remaining(deadline),
+                    trace=trace,
+                ),
+                timeout=self._remaining(deadline),
+            )
+            return decision.image_number, "web", sources, ""
+        except Exception:
+            return decision.image_number, "web", (), "web unavailable"
+
+    async def _describe_dynamic(self, video_urls, *, user_question, deadline, trace):
+        return await self.analyzer.describe_dynamic_media(
+            video_urls,
+            user_question=user_question,
+            timeout_seconds=min(self.model_timeout_seconds, self._remaining(deadline)),
+            trace=trace,
+        )
 
     @staticmethod
-    def _remaining(deadline: float) -> float:
-        return max(0.001, deadline - time.monotonic())
+    def _restore_positions(synthesis: VisionSynthesis, image_count: int) -> VisionSynthesis:
+        by_number = {item.image_number: item for item in synthesis.images}
+        return VisionSynthesis(
+            images=tuple(
+                by_number.get(
+                    image_number,
+                    ImageDecision(image_number, ConfidenceBand.UNAVAILABLE),
+                )
+                for image_number in range(1, image_count + 1)
+            ),
+            combined_answer=synthesis.combined_answer,
+        )
 
     @staticmethod
-    def _exception_text(exc: Exception) -> str:
-        return str(exc).strip() or type(exc).__name__
+    def _unavailable_synthesis(image_count: int) -> VisionSynthesis:
+        return VisionSynthesis(
+            images=tuple(
+                ImageDecision(image_number, ConfidenceBand.UNAVAILABLE)
+                for image_number in range(1, image_count + 1)
+            )
+        )
+
+    def _remaining(self, deadline: float) -> float:
+        remaining = deadline - self.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("vision pipeline deadline exhausted")
+        return remaining

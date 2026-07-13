@@ -66,7 +66,10 @@ class VisualAnalyzer:
         timeout_seconds: float,
         trace: DebugTrace | None = None,
     ) -> VisionSynthesis:
-        image_numbers = tuple(range(1, len(images) + 1))
+        image_numbers = tuple(item.image_number for item in lens_results)
+        if len(image_numbers) != len(images) or len(set(image_numbers)) != len(image_numbers):
+            fallback_numbers = image_numbers or tuple(range(1, len(images) + 1))
+            return self._unavailable_synthesis(fallback_numbers)
         prompt = self._synthesis_prompt(
             image_numbers=image_numbers,
             lens_results=lens_results,

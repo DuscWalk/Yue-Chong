@@ -562,3 +562,60 @@ def test_parse_synthesis_removes_urls_from_persistable_model_output() -> None:
     raw = json.dumps(result, default=lambda item: item.__dict__, ensure_ascii=False)
     assert "https://" not in raw
     assert "token=private" not in raw
+
+
+@pytest.mark.asyncio
+async def test_synthesize_preserves_non_contiguous_original_image_numbers() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.read())
+        return response_content(
+            {
+                "images": [
+                    {
+                        "image_number": image_number,
+                        "scene_description": f"图片{image_number}",
+                        "visible_text": [],
+                        "subject_identity": "",
+                        "work_or_affiliation": "",
+                        "source_series_or_author": "",
+                        "confidence": "no_identity",
+                        "reason": "",
+                        "needs_exact": False,
+                        "needs_web": False,
+                        "verification_query": "",
+                    }
+                    for image_number in (1, 3)
+                ],
+                "combined_answer": "",
+            }
+        )
+
+    analyzer = VisualAnalyzer(
+        api_base="https://vision.test/v1",
+        api_key="secret",
+        model_name="vision-model",
+        timeout_seconds=5,
+        enable_thinking=False,
+        video_fps=2,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await analyzer.synthesize(
+        (normalized_image("a"), normalized_image("c")),
+        (lens_result(1), lens_result(3)),
+        user_question="分别是什么？",
+        chat_context="",
+        timeout_seconds=4,
+    )
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    markers = [
+        item["text"]
+        for item in payload["messages"][0]["content"]
+        if item["type"] == "text" and item["text"].endswith("原图：")
+    ]
+    assert markers == ["图片1原图：", "图片3原图："]
+    assert [item.image_number for item in result.images] == [1, 3]

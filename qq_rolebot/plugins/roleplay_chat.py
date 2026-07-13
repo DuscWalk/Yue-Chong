@@ -31,7 +31,6 @@ from qq_rolebot.service import ChatService
 from qq_rolebot.stickers import StickerLibrary
 from qq_rolebot.storage import Storage
 from qq_rolebot.tavily import TavilyClient
-from qq_rolebot.temp_image_store import R2TemporaryImageStore
 from qq_rolebot.time_tool import TimeTool
 from qq_rolebot.tool_router import ToolRouter
 from qq_rolebot.tool_runner import ToolRunner
@@ -39,7 +38,6 @@ from qq_rolebot.tts_client import TTSClient
 from qq_rolebot.vision_cache import VisionCache
 from qq_rolebot.vision_client import VisualAnalyzer
 from qq_rolebot.vision_pipeline import VisionPipeline
-from qq_rolebot.vision_resolver import VisionEvidenceResolver
 from qq_rolebot.voice_policy import VoicePolicy
 from qq_rolebot.voice_service import VoiceService
 
@@ -52,15 +50,72 @@ def vision_settings_complete(candidate_settings) -> bool:
             candidate_settings.vision_model_api_base,
             candidate_settings.vision_model_api_key,
             candidate_settings.vision_model_name,
-            candidate_settings.serpapi_api_key,
-            candidate_settings.r2_account_id,
-            candidate_settings.r2_access_key_id,
-            candidate_settings.r2_secret_access_key,
-            candidate_settings.r2_bucket,
-            candidate_settings.serpapi_lens_enabled,
-            candidate_settings.serpapi_search_enabled,
         )
     )
+
+
+def build_vision_pipeline(candidate_settings):
+    if not candidate_settings.vision_model_enabled or not vision_settings_complete(
+        candidate_settings
+    ):
+        return None, None
+    cache = VisionCache(
+        candidate_settings.vision_cache_path,
+        ttl_seconds=candidate_settings.vision_pipeline_cache_ttl_seconds,
+    )
+    lens_client = (
+        SerpApiLensClient(
+            api_key=candidate_settings.serpapi_api_key,
+            timeout_seconds=candidate_settings.serpapi_lens_timeout_seconds,
+            poll_interval_seconds=candidate_settings.serpapi_poll_interval_seconds,
+        )
+        if candidate_settings.serpapi_lens_enabled and candidate_settings.serpapi_api_key
+        else None
+    )
+    web_client = (
+        SerpApiWebClient(
+            api_key=candidate_settings.serpapi_api_key,
+            timeout_seconds=candidate_settings.serpapi_lens_timeout_seconds,
+        )
+        if candidate_settings.serpapi_web_fallback_enabled
+        and candidate_settings.serpapi_search_enabled
+        and candidate_settings.serpapi_api_key
+        else None
+    )
+    pipeline = VisionPipeline(
+        preprocessor=ImagePreprocessor(
+            timeout_seconds=candidate_settings.vision_model_timeout_seconds,
+            max_download_bytes=candidate_settings.vision_pipeline_max_download_bytes,
+            max_image_pixels=candidate_settings.vision_pipeline_max_image_pixels,
+            model_max_edge=candidate_settings.vision_pipeline_model_max_edge,
+        ),
+        analyzer=VisualAnalyzer(
+            api_base=candidate_settings.vision_model_api_base,
+            api_key=candidate_settings.vision_model_api_key,
+            model_name=candidate_settings.vision_model_name,
+            timeout_seconds=candidate_settings.vision_model_timeout_seconds,
+            enable_thinking=False,
+            video_fps=candidate_settings.vision_model_video_fps,
+        ),
+        lens_client=lens_client,
+        web_client=web_client,
+        cache=cache,
+        total_timeout_seconds=candidate_settings.vision_pipeline_timeout_seconds,
+        multi_timeout_seconds=candidate_settings.vision_pipeline_multi_timeout_seconds,
+        lens_timeout_seconds=candidate_settings.serpapi_lens_timeout_seconds,
+        model_timeout_seconds=candidate_settings.vision_model_timeout_seconds,
+        lens_concurrency=candidate_settings.serpapi_lens_concurrency,
+        max_images=candidate_settings.vision_pipeline_max_images,
+        exact_fallback_enabled=candidate_settings.serpapi_exact_fallback_enabled,
+        web_fallback_enabled=candidate_settings.serpapi_web_fallback_enabled,
+        max_exact_fallbacks=candidate_settings.serpapi_max_exact_fallbacks_per_message,
+        max_web_fallbacks=candidate_settings.serpapi_max_web_fallbacks_per_message,
+        model_name=candidate_settings.vision_model_name,
+        prompt_version="lens-first-prompt-v1",
+        lens_parser_version="lens-all-parser-v1",
+        schema_version="vision-synthesis-v1",
+    )
+    return pipeline, cache
 
 
 storage = Storage(
@@ -101,55 +156,9 @@ tool_runner = ToolRunner(
     enable_search=settings.tools_enable_search and search_client is not None,
     enable_persona_sources=settings.tools_enable_persona_sources,
 )
-vision_client = None
-vision_cache = None
-vision_ready = vision_settings_complete(settings)
-if settings.vision_model_enabled and vision_ready:
-    vision_cache = VisionCache(
-        settings.vision_cache_path,
-        ttl_seconds=settings.vision_pipeline_cache_ttl_seconds,
-    )
-    vision_client = VisionPipeline(
-        preprocessor=ImagePreprocessor(
-            timeout_seconds=settings.vision_model_timeout_seconds,
-            max_download_bytes=settings.vision_pipeline_max_download_bytes,
-            max_image_pixels=settings.vision_pipeline_max_image_pixels,
-        ),
-        analyzer=VisualAnalyzer(
-            api_base=settings.vision_model_api_base,
-            api_key=settings.vision_model_api_key,
-            model_name=settings.vision_model_name,
-            timeout_seconds=settings.vision_model_timeout_seconds,
-            enable_thinking=settings.vision_model_enable_thinking,
-            video_fps=settings.vision_model_video_fps,
-        ),
-        lens_client=SerpApiLensClient(
-            api_key=settings.serpapi_api_key,
-            timeout_seconds=settings.serpapi_timeout_seconds,
-            exact_limit=settings.serpapi_lens_exact_limit,
-            visual_limit=settings.serpapi_lens_visual_limit,
-        ),
-        web_client=SerpApiWebClient(
-            api_key=settings.serpapi_api_key,
-            timeout_seconds=settings.serpapi_timeout_seconds,
-        ),
-        temp_store=R2TemporaryImageStore(
-            bucket=settings.r2_bucket,
-            object_prefix=settings.r2_object_prefix,
-            presigned_url_seconds=settings.r2_presigned_url_seconds,
-            account_id=settings.r2_account_id,
-            access_key_id=settings.r2_access_key_id,
-            secret_access_key=settings.r2_secret_access_key,
-        ),
-        resolver=VisionEvidenceResolver(),
-        cache=vision_cache,
-        total_timeout_seconds=settings.vision_pipeline_timeout_seconds,
-        max_images=settings.vision_pipeline_max_images,
-        web_candidate_limit=settings.serpapi_web_candidate_limit,
-        cache_version=f"evidence-v1:{settings.vision_model_name}",
-    )
-elif settings.vision_model_enabled:
-    logger.error("Vision pipeline disabled because model, SerpApi, or R2 settings are incomplete")
+vision_client, vision_cache = build_vision_pipeline(settings)
+if settings.vision_model_enabled and vision_client is None:
+    logger.error("Vision pipeline disabled because Qwen vision settings are incomplete")
 service = ChatService(
     settings=settings,
     storage=storage,
