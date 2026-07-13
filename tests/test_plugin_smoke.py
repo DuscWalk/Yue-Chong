@@ -933,6 +933,28 @@ async def test_render_outgoing_reply_sends_text_and_image_separately(monkeypatch
     assert bot.sent[1][1] == {}
 
 
+async def test_send_outgoing_reply_limits_group_quote_per_user(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, event, message, **kwargs):
+            self.sent.append((str(message), kwargs))
+
+    event = SimpleNamespace(message_type="group", group_id=20, user_id=99, message_id=12345)
+    bot = FakeBot()
+    reply = module.OutgoingReply.text("收到。", source="model")
+
+    await module.send_outgoing_reply(bot, event, reply)
+    await module.send_outgoing_reply(bot, event, reply)
+
+    assert bot.sent[0][1] == {"reply_message": True, "at_sender": True}
+    assert bot.sent[1][1] == {}
+
+
 async def test_send_outgoing_reply_quotes_first_rendered_group_message(monkeypatch) -> None:
     set_env(monkeypatch)
     module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))

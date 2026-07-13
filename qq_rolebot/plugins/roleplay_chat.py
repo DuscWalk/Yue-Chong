@@ -233,6 +233,8 @@ matcher = on_message(priority=50, block=False)
 _conversation_locks: defaultdict[tuple[str, int], asyncio.Lock] = defaultdict(asyncio.Lock)
 _custom_faces_registration_lock = asyncio.Lock()
 _custom_faces_registered = False
+GROUP_QUOTE_COOLDOWN_SECONDS = 60
+_group_quote_last_sent_at: dict[tuple[int, int], float] = {}
 
 
 async def init_storage() -> None:
@@ -452,6 +454,37 @@ def conversation_scope(event: MessageEvent) -> tuple[str, int]:
     return (message_type or "unknown", int(getattr(event, "user_id", 0)))
 
 
+def _group_quote_scope(event: MessageEvent) -> tuple[int, int] | None:
+    if getattr(event, "message_type", "") != "group":
+        return None
+    try:
+        return int(event.group_id), int(event.user_id)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _group_quote_allowed(event: MessageEvent) -> bool:
+    scope = _group_quote_scope(event)
+    if scope is None:
+        return False
+    last_sent_at = _group_quote_last_sent_at.get(scope)
+    return (
+        last_sent_at is None
+        or time.monotonic() - last_sent_at >= GROUP_QUOTE_COOLDOWN_SECONDS
+    )
+
+
+def _record_group_quote(event: MessageEvent) -> None:
+    scope = _group_quote_scope(event)
+    if scope is None:
+        return
+    now = time.monotonic()
+    _group_quote_last_sent_at[scope] = now
+    for key, sent_at in list(_group_quote_last_sent_at.items()):
+        if now - sent_at >= GROUP_QUOTE_COOLDOWN_SECONDS:
+            _group_quote_last_sent_at.pop(key, None)
+
+
 def render_outgoing_message(message: OutgoingMessage) -> MessageSegment | None:
     if message.kind == "text" and message.text.strip():
         return MessageSegment.text(message.text.strip())
@@ -487,7 +520,9 @@ def render_outgoing_message(message: OutgoingMessage) -> MessageSegment | None:
 
 async def send_outgoing_reply(bot: Bot, event: MessageEvent, reply: OutgoingReply) -> None:
     quote_first_message = (
-        getattr(event, "message_type", "") == "group" and reply.source != "repeat"
+        getattr(event, "message_type", "") == "group"
+        and reply.source != "repeat"
+        and _group_quote_allowed(event)
     )
     rendered_segments: list[MessageSegment] = []
     for outgoing_message in reply.messages:
@@ -504,6 +539,7 @@ async def send_outgoing_reply(bot: Bot, event: MessageEvent, reply: OutgoingRepl
         first_rendered_message = index == 0
         if quote_first_message and first_rendered_message:
             await bot.send(event, segment, reply_message=True, at_sender=True)
+            _record_group_quote(event)
         else:
             await bot.send(event, segment)
 
