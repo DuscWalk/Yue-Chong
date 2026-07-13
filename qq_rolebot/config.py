@@ -112,6 +112,14 @@ class Settings:
     tts_prompt_text: str
     tts_prompt_lang: str
     tts_text_lang: str
+    smtp_host: str
+    smtp_port: int
+    smtp_ssl: bool
+    smtp_user: str
+    smtp_password: str
+    alert_email_from: str
+    alert_email_to: tuple[str, ...]
+    exception_alert_cooldown_seconds: int
     vision_model_enabled: bool
     vision_model_api_base: str
     vision_model_api_key: str
@@ -273,6 +281,18 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if debug_trace_retention_seconds < 1:
         raise ConfigError("DEBUG_TRACE_RETENTION_SECONDS must be greater than 0")
 
+    smtp_port = _int(env, "SMTP_PORT", 465)
+    if smtp_port < 1 or smtp_port > 65_535:
+        raise ConfigError("SMTP_PORT must be between 1 and 65535")
+
+    exception_alert_cooldown_seconds = _int(
+        env,
+        "EXCEPTION_ALERT_COOLDOWN_SECONDS",
+        600,
+    )
+    if exception_alert_cooldown_seconds < 0:
+        raise ConfigError("EXCEPTION_ALERT_COOLDOWN_SECONDS must be greater than or equal to 0")
+
     tts_max_chars = _int(env, "TTS_MAX_CHARS", 80)
     if tts_max_chars < 1:
         raise ConfigError("TTS_MAX_CHARS must be greater than 0")
@@ -380,6 +400,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_prompt_text=env.get("TTS_PROMPT_TEXT", "").strip(),
         tts_prompt_lang=env.get("TTS_PROMPT_LANG", "zh").strip() or "zh",
         tts_text_lang=env.get("TTS_TEXT_LANG", "zh").strip() or "zh",
+        smtp_host=env.get("SMTP_HOST", "smtp.qq.com").strip(),
+        smtp_port=smtp_port,
+        smtp_ssl=_bool(env, "SMTP_SSL", True),
+        smtp_user=env.get("SMTP_USER", "").strip(),
+        smtp_password=env.get("SMTP_PASSWORD", "").strip(),
+        alert_email_from=env.get("ALERT_EMAIL_FROM", env.get("SMTP_USER", "")).strip(),
+        alert_email_to=tuple(parse_str_list(env.get("ALERT_EMAIL_TO", ""))),
+        exception_alert_cooldown_seconds=exception_alert_cooldown_seconds,
         vision_model_enabled=_bool(env, "VISION_MODEL_ENABLED", False),
         vision_model_api_base=env.get("VISION_MODEL_API_BASE", "").strip().rstrip("/"),
         vision_model_api_key=env.get("VISION_MODEL_API_KEY", "").strip(),

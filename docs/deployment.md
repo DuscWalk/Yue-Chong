@@ -188,6 +188,28 @@ R2 and a domain are not required. Lens uses the original QQ media URL. If Google
 
 Debug traces are always written to `DEBUG_TRACE_DIR` as per-message JSONL files. They include stage durations, Lens terminal status and cache state, conditional fallback counts, cache hits, in-flight coalescing, per-image failures, final confidence counts, final model prompt, model response, and final reply. Media URL query strings, image bytes, Base64, API keys, and authorization headers are not written. Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned when new trace events are written.
 
+Runtime exception alerts are separate from the NapCat account watchdog. Add the following to
+`/opt/qq-rolebot/.env` when administrator mail is desired; keep the SMTP password and recipients
+server-only:
+
+```dotenv
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=465
+SMTP_SSL=true
+SMTP_USER=sender@qq.com
+SMTP_PASSWORD=qq-mail-authorization-code
+ALERT_EMAIL_FROM=sender@qq.com
+ALERT_EMAIL_TO=admin@example.com
+EXCEPTION_ALERT_COOLDOWN_SECONDS=600
+```
+
+Exceptions in the message handler, model/provider calls, voice rendering, outgoing segment
+construction, and OneBot sends are caught before an error can be sent to the originating chat.
+The notifier sends a bounded, sanitized plain-text email and suppresses duplicate alerts by
+stage and exception type. If SMTP is unavailable, the bot logs the alert failure and continues
+without sending any error text to QQ. Unknown incoming OneBot segments such as `json` are
+ignored instead of being converted into repeatable placeholder text.
+
 Voice:
 
 ```dotenv

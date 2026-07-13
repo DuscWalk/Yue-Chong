@@ -39,6 +39,23 @@ def test_roleplay_plugin_imports(monkeypatch) -> None:
     assert hasattr(module, "extract_message_text")
 
 
+def test_unknown_only_message_is_not_buildable(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
+    event = SimpleNamespace(
+        message=[SimpleNamespace(type="json", data={"data": "{}"})],
+        message_type="group",
+        group_id=20,
+        user_id=10,
+        time=100,
+        sender=SimpleNamespace(card="", nickname="user"),
+        to_me=False,
+        get_plaintext=lambda: "",
+    )
+
+    assert module.build_incoming_message(event, bot_id=10001) is None
+
+
 def test_plugin_requires_only_complete_qwen_vision_settings(monkeypatch) -> None:
     set_env(monkeypatch)
     module = importlib.import_module("qq_rolebot.plugins.roleplay_chat")
@@ -780,6 +797,109 @@ async def test_handle_message_sends_text_when_voice_not_rendered(monkeypatch) ->
     assert bot.sent
     assert "record" not in str(bot.sent[0])
     assert "一切安好" in str(bot.sent[0])
+
+
+async def test_handle_message_suppresses_service_exception_and_alerts(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+
+    class FakeService:
+        async def handle(self, incoming, *, random_value: int):
+            raise RuntimeError("model failure")
+
+    class FakeNotifier:
+        def __init__(self):
+            self.calls = []
+
+        async def notify(self, **kwargs):
+            self.calls.append(kwargs)
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, event, message, **kwargs):
+            self.sent.append((message, kwargs))
+
+    event = SimpleNamespace(
+        message_type="private",
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy"),
+        time=123,
+        message=[],
+        get_plaintext=lambda: "你好",
+    )
+    bot = FakeBot()
+    notifier = FakeNotifier()
+    monkeypatch.setattr(module, "service", FakeService())
+    monkeypatch.setattr(module, "exception_notifier", notifier)
+    monkeypatch.setattr(module, "voice_service", None)
+    monkeypatch.setattr(module, "ensure_custom_faces_registered", lambda bot: _done())
+
+    await module.handle_message(bot, event)
+
+    assert bot.sent == []
+    assert len(notifier.calls) == 1
+    assert notifier.calls[0]["stage"] == "message_handler"
+
+
+async def test_handle_message_stops_after_outgoing_send_failure(monkeypatch) -> None:
+    set_env(monkeypatch)
+    module = importlib.reload(importlib.import_module("qq_rolebot.plugins.roleplay_chat"))
+
+    class FakeService:
+        async def handle_reply(self, incoming, *, random_value: int):
+            return module.OutgoingReply(
+                source="model",
+                messages=[
+                    module.OutgoingMessage(kind="text", text="第一段"),
+                    module.OutgoingMessage(kind="text", text="第二段"),
+                ],
+            )
+
+    class FakeNotifier:
+        def __init__(self):
+            self.calls = []
+
+        async def notify(self, **kwargs):
+            self.calls.append(kwargs)
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, event, message, **kwargs):
+            self.sent.append((message, kwargs))
+            if len(self.sent) == 2:
+                raise RuntimeError("onebot send failure")
+
+    async def no_custom_faces(bot):
+        return None
+
+    event = SimpleNamespace(
+        message_type="private",
+        user_id=99,
+        sender=SimpleNamespace(nickname="Amy"),
+        time=123,
+        message=[],
+        get_plaintext=lambda: "你好",
+    )
+    bot = FakeBot()
+    notifier = FakeNotifier()
+    monkeypatch.setattr(module, "service", FakeService())
+    monkeypatch.setattr(module, "exception_notifier", notifier)
+    monkeypatch.setattr(module, "voice_service", None)
+    monkeypatch.setattr(module, "ensure_custom_faces_registered", no_custom_faces)
+
+    await module.handle_message(bot, event)
+
+    assert len(bot.sent) == 2
+    assert len(notifier.calls) == 1
+    assert notifier.calls[0]["stage"] == "message_handler"
+
+
+async def _done():
+    return None
 
 
 async def test_render_outgoing_reply_sends_text_and_image_separately(monkeypatch) -> None:

@@ -123,6 +123,9 @@ custom faces, but active sends fall back to an `image` segment marked with NapCa
 - `VISION_TEMP_PUBLISHER_ENABLED`: must remain `false`; an HTTPS publisher backend is deferred and no R2 account is required.
 - `DEBUG_TRACE_DIR`: directory for per-message JSONL debug traces.
 - `DEBUG_TRACE_RETENTION_SECONDS`: debug trace retention; default is `86400` seconds.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SSL`, `SMTP_USER`, `SMTP_PASSWORD`: optional SMTP settings for administrator exception alerts; keep credentials server-only.
+- `ALERT_EMAIL_FROM`, `ALERT_EMAIL_TO`: sender and comma-separated administrator recipients. Empty recipients disable email without re-enabling chat error output.
+- `EXCEPTION_ALERT_COOLDOWN_SECONDS`: suppresses duplicate alerts by stage and exception type; default is `600` seconds.
 
 Persona selection:
 
@@ -143,6 +146,7 @@ Reply rules:
 - Context: user messages and successful bot replies are stored, but only messages within `CONTEXT_WINDOW_SECONDS` and not newer than the current message are included in the model prompt.
 - Follow-up window: after a user addresses the bot, their later message in the same group can trigger if it contains a question mark or one of `FOLLOWUP_TRIGGER_KEYWORDS`.
 - Repeat: if `REPEAT_REPLY_ENABLED=true`, the latest `REPEAT_REPLY_THRESHOLD` unaddressed group messages are identical, and at least two users joined the chain, reply with the same text.
+- Unknown OneBot segments such as `json` are ignored by text parsing; their diagnostic placeholder is never sent or repeated into the chat.
 - Keywords: if `KEYWORDS` appears in text, reply.
 - Random: if group random probability passes, reply.
 
@@ -219,6 +223,12 @@ Debug traces:
 - Downloaded image `data:` payloads are redacted in traces; fetch events keep only source URL, media type, byte count, and timing.
 - Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned whenever a new trace event is written.
 - API keys and Authorization headers are not written.
+
+Exception handling:
+
+- Runtime exceptions in message parsing, service/model calls, voice rendering, or OneBot sends are caught at the plugin boundary.
+- The originating chat receives no exception text or traceback. Sending stops at the first failed segment.
+- When `ALERT_EMAIL_TO` is configured, a sanitized administrator email is sent asynchronously and duplicate alerts are cooldown-limited. Email bodies omit message text, media URLs, API keys, access tokens, and image bytes.
 
 Manual probe and evaluation:
 

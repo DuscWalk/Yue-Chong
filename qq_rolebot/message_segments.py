@@ -37,6 +37,7 @@ class RepeatMedia:
     emoji_package_id: str = ""
     key: str = ""
     summary: str = ""
+    image_sub_type: int | None = None
 
     @property
     def signature(self) -> str:
@@ -70,6 +71,15 @@ def _first_value(data: dict[str, Any], keys: tuple[str, ...]) -> str:
         if value:
             return str(value)
     return ""
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_http_url(value: str) -> bool:
@@ -131,8 +141,6 @@ def summarize_segments(message: Iterable[Any]) -> str:
         elif segment_type in {"file", "offline_file"}:
             label = _first_value(data, ("name", "file", "url"))
             parts.append(f"[file: {label}]" if label else "[file]")
-        else:
-            parts.append(f"[unsupported segment: {segment_type}]")
     return " ".join(part.strip() for part in parts if part.strip())
 
 
@@ -188,7 +196,13 @@ def extract_repeat_media(message: Iterable[Any]) -> RepeatMedia:
         if mface is not None:
             return mface
         if file_value or url_value:
-            return RepeatMedia(kind="image", file=file_value, url=url_value)
+            return RepeatMedia(
+                kind="image",
+                file=file_value,
+                url=url_value,
+                summary=_first_value(data, ("summary", "faceName", "desc")),
+                image_sub_type=_optional_int(data.get("sub_type")),
+            )
     return RepeatMedia()
 
 

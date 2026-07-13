@@ -19,8 +19,14 @@ def test_summarize_segments_keeps_text_and_media_markers() -> None:
 
     assert message_segments.summarize_segments(message) == (
         "hello [image: a.jpg] [voice: voice.amr] [emoji: 14] "
-        "[file: report.pdf] [unsupported segment: json]"
+        "[file: report.pdf]"
     )
+
+
+def test_summarize_segments_omits_unknown_segments() -> None:
+    message = [segment("text", text="正常文本"), segment("json", data="{}")]
+
+    assert message_segments.summarize_segments(message) == "正常文本"
 
 
 def test_is_reply_to_detects_reply_segment() -> None:

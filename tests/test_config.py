@@ -543,3 +543,46 @@ def test_load_settings_rejects_invalid_debug_trace_retention() -> None:
 
     with pytest.raises(ConfigError, match="DEBUG_TRACE_RETENTION_SECONDS"):
         load_settings(env)
+
+
+def test_load_settings_reads_exception_alert_mail_settings() -> None:
+    env = complete_env()
+    env.update(
+        {
+            "SMTP_HOST": "smtp.example.test",
+            "SMTP_PORT": "587",
+            "SMTP_SSL": "false",
+            "SMTP_USER": "bot@example.test",
+            "SMTP_PASSWORD": "smtp-secret",
+            "ALERT_EMAIL_FROM": "alerts@example.test",
+            "ALERT_EMAIL_TO": "one@example.test, two@example.test",
+            "EXCEPTION_ALERT_COOLDOWN_SECONDS": "900",
+        }
+    )
+
+    settings = load_settings(env)
+
+    assert settings.smtp_host == "smtp.example.test"
+    assert settings.smtp_port == 587
+    assert settings.smtp_ssl is False
+    assert settings.smtp_user == "bot@example.test"
+    assert settings.smtp_password == "smtp-secret"
+    assert settings.alert_email_from == "alerts@example.test"
+    assert settings.alert_email_to == ("one@example.test", "two@example.test")
+    assert settings.exception_alert_cooldown_seconds == 900
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("SMTP_PORT", "0"),
+        ("SMTP_PORT", "65536"),
+        ("EXCEPTION_ALERT_COOLDOWN_SECONDS", "-1"),
+    ],
+)
+def test_load_settings_rejects_invalid_exception_alert_values(name: str, value: str) -> None:
+    env = complete_env()
+    env[name] = value
+
+    with pytest.raises(ConfigError, match=name):
+        load_settings(env)

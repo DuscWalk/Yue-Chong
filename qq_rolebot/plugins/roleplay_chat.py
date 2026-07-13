@@ -11,6 +11,7 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, Me
 from qq_rolebot.config import load_settings
 from qq_rolebot.custom_faces import CustomFaceRegistrar
 from qq_rolebot.debug_trace import DebugTraceLogger
+from qq_rolebot.exception_notifier import ExceptionAlertConfig, ExceptionNotifier
 from qq_rolebot.image_preprocessor import ImagePreprocessor
 from qq_rolebot.message_segments import (
     MediaUrls,
@@ -118,6 +119,21 @@ def build_vision_pipeline(candidate_settings):
     return pipeline, cache
 
 
+def build_exception_notifier(candidate_settings) -> ExceptionNotifier:
+    return ExceptionNotifier(
+        config=ExceptionAlertConfig(
+            smtp_host=candidate_settings.smtp_host,
+            smtp_port=candidate_settings.smtp_port,
+            smtp_ssl=candidate_settings.smtp_ssl,
+            smtp_user=candidate_settings.smtp_user,
+            smtp_password=candidate_settings.smtp_password,
+            sender=candidate_settings.alert_email_from,
+            recipients=candidate_settings.alert_email_to,
+            cooldown_seconds=candidate_settings.exception_alert_cooldown_seconds,
+        )
+    )
+
+
 storage = Storage(
     settings.database_path,
     context_limit=20,
@@ -157,6 +173,7 @@ tool_runner = ToolRunner(
     enable_persona_sources=settings.tools_enable_persona_sources,
 )
 vision_client, vision_cache = build_vision_pipeline(settings)
+exception_notifier = build_exception_notifier(settings)
 if settings.vision_model_enabled and vision_client is None:
     logger.error("Vision pipeline disabled because Qwen vision settings are incomplete")
 service = ChatService(
@@ -393,6 +410,7 @@ def build_incoming_message(
             repeat_media_emoji_package_id=repeat_media.emoji_package_id,
             repeat_media_key=repeat_media.key,
             repeat_media_summary=repeat_media.summary,
+            repeat_media_image_sub_type=repeat_media.image_sub_type,
             repeat_signature=repeat_media.signature,
         )
 
@@ -418,6 +436,7 @@ def build_incoming_message(
             repeat_media_emoji_package_id=repeat_media.emoji_package_id,
             repeat_media_key=repeat_media.key,
             repeat_media_summary=repeat_media.summary,
+            repeat_media_image_sub_type=repeat_media.image_sub_type,
             repeat_signature=repeat_media.signature,
         )
 
@@ -470,16 +489,23 @@ async def send_outgoing_reply(bot: Bot, event: MessageEvent, reply: OutgoingRepl
     quote_first_message = (
         getattr(event, "message_type", "") == "group" and reply.source != "repeat"
     )
-    first_rendered_message = True
+    rendered_segments: list[MessageSegment] = []
     for outgoing_message in reply.messages:
         segment = render_outgoing_message(outgoing_message)
         if segment is None:
+            logger.warning(
+                "skipping unsupported outgoing message kind: %s",
+                outgoing_message.kind,
+            )
             continue
+        rendered_segments.append(segment)
+
+    for index, segment in enumerate(rendered_segments):
+        first_rendered_message = index == 0
         if quote_first_message and first_rendered_message:
             await bot.send(event, segment, reply_message=True, at_sender=True)
         else:
             await bot.send(event, segment)
-        first_rendered_message = False
 
 
 async def _service_handle_reply(
@@ -496,7 +522,19 @@ async def _service_handle_reply(
 @matcher.handle()
 async def handle_message(bot: Bot, event: MessageEvent) -> None:
     async with _conversation_locks[conversation_scope(event)]:
-        await _handle_message_locked(bot, event)
+        try:
+            await _handle_message_locked(bot, event)
+        except Exception as exc:
+            logger.exception("message handler failed; suppressing chat output")
+            try:
+                await exception_notifier.notify(
+                    stage="message_handler",
+                    error=exc,
+                    group_id=int(getattr(event, "group_id", 0) or 0),
+                    user_id=int(getattr(event, "user_id", 0) or 0),
+                )
+            except Exception:
+                logger.exception("exception notifier failed")
 
 
 async def _handle_message_locked(bot: Bot, event: MessageEvent) -> None:
