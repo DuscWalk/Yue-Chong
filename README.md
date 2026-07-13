@@ -26,7 +26,7 @@ QQ 小号
   -> ChatService
      -> SQLite context and group settings
      -> ToolRunner: time / Tavily search / persona source lookup
-     -> optional VisionPipeline: visual model / SerpApi Lens + web / temporary R2 URL
+     -> optional VisionPipeline: Lens type=all / visual model / conditional exact + web
      -> OpenAI-compatible chat model
      -> optional TTS voice rendering
 ```
@@ -108,16 +108,19 @@ custom faces, but active sends fall back to an `image` segment marked with NapCa
 `emoji_package_id`, `key`, and `summary`).
 - `VISION_MODEL_ENABLED`: whether to run the evidence-driven vision pipeline after the reply policy has already allowed a response.
 - `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible visual-analysis model settings.
-- `VISION_MODEL_TIMEOUT_SECONDS`: component cap for visual-model calls; default is `8` seconds.
-- `VISION_MODEL_ENABLE_THINKING`: optional model-specific thinking switch; default is `false` so the shared budget remains available for verifiable search.
+- `VISION_MODEL_TIMEOUT_SECONDS`: component cap for visual-model calls; default is `20` seconds.
+- `VISION_MODEL_ENABLE_THINKING`: retained provider switch; the Lens-first static path forces thinking off.
 - `VISION_MODEL_VIDEO_FPS`: sampling fps hint for dynamic media and video understanding.
-- `VISION_PIPELINE_TIMEOUT_SECONDS`: one total vision-stage deadline; default is `15` seconds and does not include the final roleplay-model response.
-- `VISION_PIPELINE_MAX_IMAGES`: maximum static images processed per message; default is `2`.
+- `VISION_PIPELINE_TIMEOUT_SECONDS`: hard deadline for one or two static images; default is `50` seconds. The operational soft target is `25` seconds.
+- `VISION_PIPELINE_MULTI_TIMEOUT_SECONDS`: hard deadline for three or four images; default is `70` seconds.
+- `VISION_PIPELINE_MAX_IMAGES`: maximum static images processed per message; default is `4`.
+- `VISION_PIPELINE_MODEL_MAX_EDGE`: maximum long edge sent to the visual model; default is `1600` pixels.
 - `VISION_PIPELINE_CACHE_TTL_SECONDS`: structured evidence cache lifetime; default is one day.
 - `VISION_PIPELINE_MAX_DOWNLOAD_BYTES`, `VISION_PIPELINE_MAX_IMAGE_PIXELS`: download and decoded-image safety limits.
-- `SERPAPI_API_KEY`, `SERPAPI_LENS_ENABLED`, `SERPAPI_SEARCH_ENABLED`: SerpApi Google Lens and Google Search settings.
-- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`: private Cloudflare R2 temporary-image store settings.
-- `R2_PRESIGNED_URL_SECONDS`: signed URL lifetime; default is `300` seconds.
+- `SERPAPI_API_KEY`, `SERPAPI_LENS_ENABLED`, `SERPAPI_SEARCH_ENABLED`: optional SerpApi Google Lens and Google Search settings. Without a key, static recognition degrades to Qwen-only.
+- `SERPAPI_LENS_TIMEOUT_SECONDS`, `SERPAPI_POLL_INTERVAL_SECONDS`, `SERPAPI_LENS_CONCURRENCY`: Lens polling deadline, interval, and per-message concurrency.
+- `SERPAPI_EXACT_FALLBACK_ENABLED`, `SERPAPI_WEB_FALLBACK_ENABLED`: conditional fallback switches; exact matches are not queried on the normal path.
+- `VISION_TEMP_PUBLISHER_ENABLED`: must remain `false`; an HTTPS publisher backend is deferred and no R2 account is required.
 - `DEBUG_TRACE_DIR`: directory for per-message JSONL debug traces.
 - `DEBUG_TRACE_RETENTION_SECONDS`: debug trace retention; default is `86400` seconds.
 
@@ -196,24 +199,39 @@ Vision summary:
 - If a user replies to an image and asks the bot about it, the bot uses the replied message's media before falling back to recent text context.
 - Successful image summaries are saved as short-lived text context keyed by their `[image: ...]` or `[video: ...]` marker. Follow-up questions like `这谁` can reuse the latest summary, and replies to a previously summarized image reuse the matching summary without re-identifying it.
 - Downloads and normalizes static images in memory, hashes normalized bytes for cache lookup, and does not persist raw user images locally.
-- Runs visual analysis, Google Lens, and temporary R2 publication concurrently under one configurable deadline.
-- Tries the original QQ URL with Lens first. If Google cannot fetch it, the bot retries through a short-lived signed URL in a private R2 bucket.
-- Only confirms a public person or fictional character when independent evidence meets deterministic rules. Visual resemblance alone, one weak repost, conflicting results, cosplay, fan art, or private-person matches remain explicitly uncertain.
+- Runs Google Lens `type=all` against each original QQ URL first, then makes one numbered multi-image Qwen synthesis call.
+- Runs exact-match Lens or bounded Web Search only when the first synthesis requests it, with at most two calls of each type per message and one text-only re-evaluation.
+- Prefers accuracy over speed: the soft target is 25 seconds, hard limits are 50 seconds for one or two images and 70 seconds for three or four images.
+- Does not require R2 or a domain. If Google cannot fetch an original URL, Lens evidence is unavailable and Qwen still inspects the normalized image; the optional HTTPS publisher remains disabled.
+- Treats uncertain identity as uncertain rather than inventing a name. Unknown private people are described without identifying them.
 - Sends OneBot `video` URLs and obvious dynamic media such as `.gif` / `.mp4` to the visual model for objective description only; the first release does not run Lens identity resolution for dynamic media.
 - Repeated images may reuse versioned structured evidence from `VISION_CACHE_PATH` without new provider calls.
 - The vision model does not write the final roleplay reply; DeepSeek/main chat model still produces the answer.
-- Triggered images are submitted to the configured visual provider, SerpApi/Google Lens, and private temporary object storage. Untriggered group images are not uploaded or searched.
+- Triggered images are submitted to the configured visual provider and, when configured, SerpApi/Google. Untriggered group images are not uploaded or searched.
 
 Debug traces:
 
 - Always enabled.
-- Media URL query strings, image bytes, Base64, R2 signed URLs, provider keys, and authorization headers are not written.
+- Media URL query strings, image bytes, Base64, provider keys, and authorization headers are not written.
 - Summarize vision latency and decision metrics with `python scripts/summarize_vision_traces.py data/debug_traces`.
 - Written as per-message JSONL files under `DEBUG_TRACE_DIR`.
 - Include incoming message text/media URLs, media marker/source, replied message id, vision recognition result, image/web search result, saved/reused vision context, final model prompt, model response, and final cleaned reply.
 - Downloaded image `data:` payloads are redacted in traces; fetch events keep only source URL, media type, byte count, and timing.
 - Files older than `DEBUG_TRACE_RETENTION_SECONDS` are pruned whenever a new trace event is written.
 - API keys and Authorization headers are not written.
+
+Manual probe and evaluation:
+
+```bash
+VISION_PROBE_IMAGE_URL='https://public.example/image.jpg' \
+  python scripts/probe_vision_pipeline.py --lens-only
+VISION_PROBE_IMAGE_URL='https://public.example/image.jpg' \
+  python scripts/probe_vision_pipeline.py --full
+python scripts/evaluate_vision_pipeline.py --manifest data/vision-eval/cases.jsonl --dry-run
+python scripts/evaluate_vision_pipeline.py --manifest data/vision-eval/cases.jsonl
+```
+
+Keep the 20–50 case JSONL manifest and its non-private image URLs on the server. Probe and evaluation output contains only sanitized status, counts, aggregate labels, and latency metrics. A cold image normally consumes one Lens query; exact fallback consumes one additional Lens query, while normalized-image hash and combined synthesis cache hits consume none.
 
 ## Voice Replies
 

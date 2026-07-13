@@ -160,6 +160,12 @@ class VisionPipeline:
             context_parts.append(f"另有 {overflow_count} 张图片未进入识图。")
         context_text = "\n\n".join(part for part in context_parts if part)
         if trace is not None:
+            confidence_counts = {
+                confidence.value: sum(
+                    item.confidence is confidence for item in synthesis.images
+                )
+                for confidence in ConfidenceBand
+            }
             trace.event(
                 "vision.pipeline.result",
                 {
@@ -168,6 +174,7 @@ class VisionPipeline:
                     "image_count": len(selected_images),
                     "video_count": len(selected_videos),
                     "elapsed_ms": round((self.monotonic() - started) * 1000),
+                    "confidence_counts": confidence_counts,
                 },
             )
         return VisionPipelineResult(
@@ -228,6 +235,8 @@ class VisionPipeline:
         )
         cached_synthesis = await self.cache.get_synthesis(synthesis_key, now=self.now())
         if cached_synthesis is not None:
+            if trace is not None:
+                trace.event("vision.cache.hit", {"stage": "synthesis"})
             return cached_synthesis
         if not prepared:
             return self._unavailable_synthesis(len(image_urls))
@@ -292,7 +301,16 @@ class VisionPipeline:
                 ),
                 timeout=self._remaining(deadline),
             )
-        except Exception:
+        except Exception as exc:
+            if trace is not None:
+                trace.event(
+                    "vision.image.failure",
+                    {
+                        "image_number": image_number,
+                        "stage": "preprocess",
+                        "error_type": self._failure_type(exc),
+                    },
+                )
             return None
         return _PreparedImage(image_number=image_number, source_url=url, image=image)
 
@@ -312,6 +330,8 @@ class VisionPipeline:
                 now=self.now(),
             )
             if cached is not None:
+                if trace is not None:
+                    trace.event("vision.cache.hit", {"stage": "lens_all"})
                 results[image_hash] = cached
                 return
             if self.lens_client is None or self.monotonic() >= stage_deadline:
@@ -358,6 +378,8 @@ class VisionPipeline:
                     )
                 )
                 self._inflight_lens[image_hash] = task
+            elif trace is not None:
+                trace.event("vision.inflight.coalesced", {"stage": "lens_all"})
             return task
 
     async def _run_lens(
@@ -459,7 +481,10 @@ class VisionPipeline:
             version=self.lens_parser_version,
             now=self.now(),
         )
-        if cached is None:
+        if cached is not None:
+            if trace is not None:
+                trace.event("vision.cache.hit", {"stage": "lens_exact"})
+        else:
             try:
                 cached = await asyncio.wait_for(
                     self.lens_client.search_exact(
@@ -530,3 +555,16 @@ class VisionPipeline:
         if remaining <= 0:
             raise TimeoutError("vision pipeline deadline exhausted")
         return remaining
+
+    @staticmethod
+    def _failure_type(exc: Exception) -> str:
+        text = f"{type(exc).__name__} {exc}".casefold()
+        if "timeout" in text or "deadline" in text:
+            return "timeout"
+        if "ssl" in text or "tls" in text or "certificate" in text:
+            return "tls"
+        if "connect" in text or "name or service" in text or "dns" in text:
+            return "dns"
+        if "401" in text or "403" in text or "auth" in text:
+            return "authentication"
+        return "provider"

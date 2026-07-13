@@ -227,6 +227,14 @@ class FakeCache:
         self.syntheses[request_hash] = synthesis
 
 
+class CaptureTrace:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def event(self, name: str, data: dict) -> None:
+        self.events.append((name, data))
+
+
 def make_pipeline(
     *,
     preprocessor=None,
@@ -354,17 +362,30 @@ async def test_pipeline_preserves_position_when_one_preprocess_fails() -> None:
         analyzer=analyzer,
         lens=FakeLens(),
     )
+    trace = CaptureTrace()
 
     result = await pipeline.describe(
         ["https://qq.test/a.png", failed, "https://qq.test/c.png"],
         user_question="分别是谁？",
         chat_context="",
+        trace=trace,
     )
 
     assert [item.image_number for item in analyzer.lens_results] == [1, 3]
     assert [item.image_number for item in result.synthesis.images] == [1, 2, 3]
     assert result.synthesis.images[1].confidence is ConfidenceBand.UNAVAILABLE
     assert result.synthesis.images[2].confidence is ConfidenceBand.CONFIRMED
+    failure_events = [data for name, data in trace.events if name == "vision.image.failure"]
+    assert failure_events == [
+        {"image_number": 2, "stage": "preprocess", "error_type": "provider"}
+    ]
+    pipeline_events = [data for name, data in trace.events if name == "vision.pipeline.result"]
+    assert pipeline_events[-1]["confidence_counts"] == {
+        "confirmed": 2,
+        "uncertain": 0,
+        "no_identity": 0,
+        "unavailable": 1,
+    }
 
 
 @pytest.mark.asyncio
@@ -373,17 +394,22 @@ async def test_combined_cache_hit_skips_lens_and_qwen() -> None:
     analyzer = FakeAnalyzer()
     lens = FakeLens()
     pipeline = make_pipeline(analyzer=analyzer, lens=lens, cache=cache)
+    trace = CaptureTrace()
     first = await pipeline.describe(
         ["https://qq.test/a.png"], user_question="这是谁？", chat_context=""
     )
 
     second = await pipeline.describe(
-        ["https://qq.test/a.png"], user_question="这是谁？", chat_context=""
+        ["https://qq.test/a.png"],
+        user_question="这是谁？",
+        chat_context="",
+        trace=trace,
     )
 
     assert second.synthesis == first.synthesis
     assert analyzer.synthesize_calls == 1
     assert len(lens.all_urls) == 1
+    assert ("vision.cache.hit", {"stage": "synthesis"}) in trace.events
 
 
 @pytest.mark.asyncio
@@ -392,33 +418,40 @@ async def test_lens_cache_hit_still_runs_qwen_for_a_new_question() -> None:
     analyzer = FakeAnalyzer()
     lens = FakeLens()
     pipeline = make_pipeline(analyzer=analyzer, lens=lens, cache=cache)
+    trace = CaptureTrace()
     await pipeline.describe(
         ["https://qq.test/a.png"], user_question="这是谁？", chat_context=""
     )
 
     await pipeline.describe(
-        ["https://qq.test/a.png"], user_question="来自什么作品？", chat_context=""
+        ["https://qq.test/a.png"],
+        user_question="来自什么作品？",
+        chat_context="",
+        trace=trace,
     )
 
     assert analyzer.synthesize_calls == 2
     assert len(lens.all_urls) == 1
+    assert ("vision.cache.hit", {"stage": "lens_all"}) in trace.events
 
 
 @pytest.mark.asyncio
 async def test_concurrent_same_hash_requests_share_one_inflight_lens_task() -> None:
     lens = FakeLens(delay=0.05)
     pipeline = make_pipeline(lens=lens)
+    trace = CaptureTrace()
 
     await asyncio.gather(
         pipeline.describe(
-            ["https://qq.test/a.png"], user_question="问题一", chat_context=""
+            ["https://qq.test/a.png"], user_question="问题一", chat_context="", trace=trace
         ),
         pipeline.describe(
-            ["https://qq.test/a.png"], user_question="问题二", chat_context=""
+            ["https://qq.test/a.png"], user_question="问题二", chat_context="", trace=trace
         ),
     )
 
     assert len(lens.all_urls) == 1
+    assert ("vision.inflight.coalesced", {"stage": "lens_all"}) in trace.events
 
 
 @pytest.mark.asyncio

@@ -18,18 +18,27 @@ def write_trace(root: Path, name: str, events: list[tuple[str, dict]]) -> None:
     )
 
 
-def test_summarizer_reports_latency_and_decision_metrics(tmp_path: Path) -> None:
+def test_summarizer_reports_lens_first_stage_and_cache_metrics(tmp_path: Path) -> None:
     write_trace(
         tmp_path,
         "one",
         [
-            ("vision.cache.hit", {"stage": "resolution"}),
-            ("vision.lens.result", {"ok": True, "exact_count": 1, "visual_count": 2}),
-            ("vision.web.result", {"ok": True, "supporting_count": 1}),
-            ("vision.resolver.result", {"confidence": "confirmed", "rule_id": "exact"}),
+            ("vision.cache.hit", {"stage": "lens_all"}),
+            ("vision.cache.hit", {"stage": "synthesis"}),
+            ("vision.inflight.coalesced", {"stage": "lens_all"}),
+            ("vision.lens_all.submit", {"result_type": "all"}),
+            ("vision.lens_all.result", {"ok": True, "cached": True, "elapsed_ms": 800}),
+            ("vision.synthesis.result", {"ok": True, "elapsed_ms": 200}),
+            ("vision.lens_exact.submit", {"result_type": "exact_matches"}),
+            ("vision.web_search.result", {"ok": True, "elapsed_ms": 300}),
+            ("vision.reevaluation.result", {"ok": True, "elapsed_ms": 100}),
             (
                 "vision.pipeline.result",
-                {"elapsed_ms": 1000, "timed_out": False, "confirmed_count": 1},
+                {
+                    "elapsed_ms": 1000,
+                    "timed_out": False,
+                    "confidence_counts": {"confirmed": 1, "uncertain": 1},
+                },
             ),
         ],
     )
@@ -37,10 +46,16 @@ def test_summarizer_reports_latency_and_decision_metrics(tmp_path: Path) -> None
         tmp_path,
         "two",
         [
-            ("vision.resolver.result", {"confidence": "uncertain", "rule_id": "weak"}),
+            ("vision.lens_all.submit", {"result_type": "all"}),
+            ("vision.lens_all.result", {"ok": False, "cached": False, "elapsed_ms": 1800}),
+            ("vision.image.failure", {"image_number": 2, "stage": "preprocess"}),
             (
                 "vision.pipeline.result",
-                {"elapsed_ms": 2000, "timed_out": False, "confirmed_count": 0},
+                {
+                    "elapsed_ms": 2000,
+                    "timed_out": False,
+                    "confidence_counts": {"unavailable": 1},
+                },
             ),
         ],
     )
@@ -50,7 +65,11 @@ def test_summarizer_reports_latency_and_decision_metrics(tmp_path: Path) -> None
         [
             (
                 "vision.pipeline.result",
-                {"elapsed_ms": 9000, "timed_out": True, "confirmed_count": 0},
+                {
+                    "elapsed_ms": 9000,
+                    "timed_out": True,
+                    "confidence_counts": {"no_identity": 1},
+                },
             ),
         ],
     )
@@ -61,13 +80,26 @@ def test_summarizer_reports_latency_and_decision_metrics(tmp_path: Path) -> None
     assert summary["p50_ms"] == 2000
     assert summary["p90_ms"] == 9000
     assert summary["p95_ms"] == 9000
+    assert summary["timeouts"] == 1
+    assert summary["timeout_rate"] == 1 / 3
     assert summary["confirmed"] == 1
     assert summary["uncertain"] == 1
+    assert summary["no_identity"] == 1
     assert summary["unavailable"] == 1
-    assert summary["timeouts"] == 1
-    assert summary["cache_hits"] == 1
-    assert summary["lens_successes"] == 1
-    assert summary["web_successes"] == 1
+    assert summary["lens_all_submits"] == 2
+    assert summary["lens_all_successes"] == 1
+    assert summary["lens_all_failures"] == 1
+    assert summary["lens_all_cached"] == 1
+    assert summary["lens_all_p50_ms"] == 800
+    assert summary["lens_all_p95_ms"] == 1800
+    assert summary["synthesis_calls"] == 1
+    assert summary["reevaluation_calls"] == 1
+    assert summary["exact_fallbacks"] == 1
+    assert summary["web_fallbacks"] == 1
+    assert summary["image_failures"] == 1
+    assert summary["lens_cache_hits"] == 1
+    assert summary["synthesis_cache_hits"] == 1
+    assert summary["inflight_coalesced"] == 1
 
 
 def test_summarizer_ignores_malformed_lines_and_sensitive_payloads(tmp_path: Path) -> None:

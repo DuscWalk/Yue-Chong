@@ -4,21 +4,38 @@ import argparse
 import json
 import math
 from pathlib import Path
+from typing import Any
 
 
-def summarize_trace_dir(root: Path) -> dict[str, int]:
+def summarize_trace_dir(root: Path) -> dict[str, int | float]:
     durations: list[int] = []
-    confirmed = 0
-    uncertain = 0
-    unavailable = 0
+    lens_durations: list[int] = []
+    synthesis_durations: list[int] = []
+    reevaluation_durations: list[int] = []
+    confidence_counts = {
+        "confirmed": 0,
+        "uncertain": 0,
+        "no_identity": 0,
+        "unavailable": 0,
+    }
     timeouts = 0
-    cache_hits = 0
-    lens_successes = 0
-    web_successes = 0
+    counters = {
+        "lens_all_submits": 0,
+        "lens_all_successes": 0,
+        "lens_all_failures": 0,
+        "lens_all_cached": 0,
+        "synthesis_calls": 0,
+        "reevaluation_calls": 0,
+        "exact_fallbacks": 0,
+        "web_fallbacks": 0,
+        "image_failures": 0,
+        "lens_cache_hits": 0,
+        "exact_cache_hits": 0,
+        "synthesis_cache_hits": 0,
+        "inflight_coalesced": 0,
+    }
 
     for path in root.glob("*.jsonl"):
-        trace_confidences: list[str] = []
-        pipeline_seen = False
         for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             try:
                 event = json.loads(raw_line)
@@ -30,46 +47,75 @@ def summarize_trace_dir(root: Path) -> dict[str, int]:
             data = event.get("data")
             if not isinstance(data, dict):
                 continue
-            if name == "vision.cache.hit" and data.get("stage") == "resolution":
-                cache_hits += 1
-            elif name == "vision.lens.result" and data.get("ok") is True:
-                lens_successes += 1
-            elif name == "vision.web.result" and data.get("ok") is True:
-                web_successes += 1
-            elif name == "vision.resolver.result":
-                confidence = data.get("confidence")
-                if confidence in {"confirmed", "uncertain", "unavailable"}:
-                    trace_confidences.append(str(confidence))
+            if name == "vision.cache.hit":
+                stage = data.get("stage")
+                cache_key = {
+                    "lens_all": "lens_cache_hits",
+                    "lens_exact": "exact_cache_hits",
+                    "synthesis": "synthesis_cache_hits",
+                }.get(stage)
+                if cache_key:
+                    counters[cache_key] += 1
+            elif name == "vision.inflight.coalesced":
+                counters["inflight_coalesced"] += 1
+            elif name == "vision.lens_all.submit":
+                counters["lens_all_submits"] += 1
+            elif name == "vision.lens_all.result":
+                counters[
+                    "lens_all_successes" if data.get("ok") is True else "lens_all_failures"
+                ] += 1
+                counters["lens_all_cached"] += int(data.get("cached") is True)
+                _append_duration(lens_durations, data.get("elapsed_ms"))
+            elif name == "vision.synthesis.result":
+                counters["synthesis_calls"] += 1
+                _append_duration(synthesis_durations, data.get("elapsed_ms"))
+            elif name == "vision.reevaluation.result":
+                counters["reevaluation_calls"] += 1
+                _append_duration(reevaluation_durations, data.get("elapsed_ms"))
+            elif name == "vision.lens_exact.submit":
+                counters["exact_fallbacks"] += 1
+            elif name == "vision.web_search.result":
+                counters["web_fallbacks"] += 1
+            elif name == "vision.image.failure" or (
+                name == "vision.image.preprocess" and data.get("ok") is False
+            ):
+                counters["image_failures"] += 1
             elif name == "vision.pipeline.result":
-                elapsed = data.get("elapsed_ms")
-                if isinstance(elapsed, int | float) and elapsed >= 0:
-                    durations.append(round(elapsed))
+                _append_duration(durations, data.get("elapsed_ms"))
                 timeouts += int(data.get("timed_out") is True)
-                pipeline_seen = True
-
-        if not pipeline_seen:
-            continue
-        if "confirmed" in trace_confidences:
-            confirmed += 1
-        elif "uncertain" in trace_confidences:
-            uncertain += 1
-        else:
-            unavailable += 1
+                raw_counts = data.get("confidence_counts")
+                if isinstance(raw_counts, dict):
+                    for confidence in confidence_counts:
+                        value = raw_counts.get(confidence)
+                        if isinstance(value, int) and value >= 0:
+                            confidence_counts[confidence] += value
 
     durations.sort()
+    lens_durations.sort()
+    synthesis_durations.sort()
+    reevaluation_durations.sort()
+    count = len(durations)
     return {
         "count": len(durations),
         "p50_ms": _percentile(durations, 0.50),
         "p90_ms": _percentile(durations, 0.90),
         "p95_ms": _percentile(durations, 0.95),
-        "confirmed": confirmed,
-        "uncertain": uncertain,
-        "unavailable": unavailable,
         "timeouts": timeouts,
-        "cache_hits": cache_hits,
-        "lens_successes": lens_successes,
-        "web_successes": web_successes,
+        "timeout_rate": timeouts / count if count else 0.0,
+        **confidence_counts,
+        **counters,
+        "lens_all_p50_ms": _percentile(lens_durations, 0.50),
+        "lens_all_p95_ms": _percentile(lens_durations, 0.95),
+        "synthesis_p50_ms": _percentile(synthesis_durations, 0.50),
+        "synthesis_p95_ms": _percentile(synthesis_durations, 0.95),
+        "reevaluation_p50_ms": _percentile(reevaluation_durations, 0.50),
+        "reevaluation_p95_ms": _percentile(reevaluation_durations, 0.95),
     }
+
+
+def _append_duration(target: list[int], value: Any) -> None:
+    if isinstance(value, int | float) and value >= 0:
+        target.append(round(value))
 
 
 def _percentile(values: list[int], probability: float) -> int:
@@ -79,22 +125,14 @@ def _percentile(values: list[int], probability: float) -> int:
     return values[rank - 1]
 
 
-def _table(summary: dict[str, int]) -> str:
-    order = (
-        "count",
-        "p50_ms",
-        "p90_ms",
-        "p95_ms",
-        "confirmed",
-        "uncertain",
-        "unavailable",
-        "timeouts",
-        "cache_hits",
-        "lens_successes",
-        "web_successes",
-    )
+def _table(summary: dict[str, int | float]) -> str:
+    order = tuple(summary)
     width = max(len(key) for key in order)
-    return "\n".join(f"{key:<{width}}  {summary[key]}" for key in order)
+    return "\n".join(f"{key:<{width}}  {_format_value(summary[key])}" for key in order)
+
+
+def _format_value(value: int | float) -> str:
+    return f"{value:.3f}" if isinstance(value, float) else str(value)
 
 
 def main() -> None:
