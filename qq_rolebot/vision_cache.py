@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -12,14 +11,10 @@ import aiosqlite
 from qq_rolebot.vision_types import (
     ConfidenceBand,
     ExactSearchResult,
-    IdentityCandidate,
     ImageDecision,
     LensAllEvidence,
-    LensEvidence,
     LensSearchResult,
     SearchSource,
-    VisionObservation,
-    VisionResolution,
     VisionSynthesis,
 )
 
@@ -168,84 +163,6 @@ class VisionCache:
             now=now,
         )
 
-    async def get_observation(
-        self,
-        image_hash: str,
-        *,
-        version: str,
-        now: int,
-    ) -> VisionObservation | None:
-        data = await self._get(image_hash, stage="observation", version=version, now=now)
-        return self._decode_observation(data) if data is not None else None
-
-    async def put_observation(
-        self,
-        image_hash: str,
-        *,
-        version: str,
-        observation: VisionObservation,
-        now: int,
-    ) -> None:
-        await self._put(
-            image_hash,
-            stage="observation",
-            version=version,
-            payload=asdict(observation),
-            now=now,
-        )
-
-    async def get_lens(
-        self,
-        image_hash: str,
-        *,
-        version: str,
-        now: int,
-    ) -> LensEvidence | None:
-        data = await self._get(image_hash, stage="lens", version=version, now=now)
-        return self._decode_lens(data) if data is not None else None
-
-    async def put_lens(
-        self,
-        image_hash: str,
-        *,
-        version: str,
-        lens: LensEvidence,
-        now: int,
-    ) -> None:
-        await self._put(
-            image_hash,
-            stage="lens",
-            version=version,
-            payload=asdict(lens),
-            now=now,
-        )
-
-    async def get_resolution(
-        self,
-        image_hash: str,
-        *,
-        version: str,
-        now: int,
-    ) -> VisionResolution | None:
-        data = await self._get(image_hash, stage="resolution", version=version, now=now)
-        return self._decode_resolution(data) if data is not None else None
-
-    async def put_resolution(
-        self,
-        image_hash: str,
-        *,
-        version: str,
-        resolution: VisionResolution,
-        now: int,
-    ) -> None:
-        await self._put(
-            image_hash,
-            stage="resolution",
-            version=version,
-            payload=asdict(resolution),
-            now=now,
-        )
-
     async def _get(
         self,
         image_hash: str,
@@ -296,33 +213,6 @@ class VisionCache:
                 (image_hash, stage, version, encoded, now),
             )
             await db.commit()
-
-    @staticmethod
-    def _decode_observation(data: dict[str, Any]) -> VisionObservation | None:
-        try:
-            return VisionObservation(
-                scene_description=str(data.get("scene_description", "")),
-                visible_text=tuple(str(item) for item in data.get("visible_text", [])),
-                people_or_characters=tuple(
-                    str(item) for item in data.get("people_or_characters", [])
-                ),
-                distinctive_features=tuple(
-                    str(item) for item in data.get("distinctive_features", [])
-                ),
-            )
-        except (TypeError, ValueError):
-            return None
-
-    @classmethod
-    def _decode_lens(cls, data: dict[str, Any]) -> LensEvidence | None:
-        try:
-            return LensEvidence(
-                exact_matches=cls._decode_sources(data.get("exact_matches")),
-                visual_matches=cls._decode_sources(data.get("visual_matches")),
-                repeated_entities=tuple(str(item) for item in data.get("repeated_entities", [])),
-            )
-        except (TypeError, ValueError):
-            return None
 
     @classmethod
     def _decode_lens_all(cls, data: dict[str, Any]) -> LensSearchResult | None:
@@ -388,28 +278,6 @@ class VisionCache:
             return None
 
     @classmethod
-    def _decode_resolution(cls, data: dict[str, Any]) -> VisionResolution | None:
-        try:
-            observation = cls._decode_observation(data.get("observation", {}))
-            if observation is None:
-                return None
-            candidates = cls._decode_candidates(data.get("candidates"))
-            confirmed_data = data.get("confirmed_identity")
-            confirmed = (
-                cls._decode_candidate(confirmed_data) if isinstance(confirmed_data, dict) else None
-            )
-            return VisionResolution(
-                confidence=ConfidenceBand(str(data["confidence"])),
-                observation=observation,
-                candidates=candidates,
-                confirmed_identity=confirmed,
-                evidence_summary=str(data.get("evidence_summary", "")),
-                uncertainty_reason=str(data.get("uncertainty_reason", "")),
-            )
-        except (KeyError, TypeError, ValueError):
-            return None
-
-    @classmethod
     def _decode_sources(cls, value: Any) -> tuple[SearchSource, ...]:
         if not isinstance(value, list):
             return ()
@@ -465,27 +333,3 @@ class VisionCache:
     @staticmethod
     def _safe_text(value: str) -> str:
         return " ".join(_URL_RE.sub("", str(value)).split())
-
-    @classmethod
-    def _decode_candidates(cls, value: Any) -> tuple[IdentityCandidate, ...]:
-        if not isinstance(value, list):
-            return ()
-        return tuple(
-            candidate
-            for item in value
-            if isinstance(item, dict) and (candidate := cls._decode_candidate(item)) is not None
-        )
-
-    @staticmethod
-    def _decode_candidate(data: dict[str, Any]) -> IdentityCandidate | None:
-        name = str(data.get("name", "")).strip()
-        entity_type = str(data.get("entity_type", "")).strip()
-        if not name or not entity_type:
-            return None
-        return IdentityCandidate(
-            name=name,
-            entity_type=entity_type,
-            work_or_affiliation=str(data.get("work_or_affiliation", "")),
-            visual_reason=str(data.get("visual_reason", "")),
-            source_stage=str(data.get("source_stage", "")),
-        )

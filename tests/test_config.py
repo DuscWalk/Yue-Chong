@@ -236,14 +236,7 @@ def test_load_settings_reads_tts_defaults() -> None:
     assert settings.serpapi_web_fallback_enabled is True
     assert settings.serpapi_max_exact_fallbacks_per_message == 2
     assert settings.serpapi_max_web_fallbacks_per_message == 2
-    assert settings.serpapi_timeout_seconds == 8.0
-    assert settings.serpapi_lens_exact_limit == 5
-    assert settings.serpapi_lens_visual_limit == 10
-    assert settings.serpapi_web_candidate_limit == 2
-    assert settings.vision_temp_store_backend == "r2"
     assert settings.vision_temp_publisher_enabled is False
-    assert settings.r2_presigned_url_seconds == 300
-    assert settings.r2_object_prefix == "vision-temp/"
     assert settings.vision_cache_path.as_posix() == "data/vision_cache.sqlite3"
     assert not hasattr(settings, "vision_model_mode")
     assert not hasattr(settings, "vision_model_search_input")
@@ -318,18 +311,7 @@ def test_load_settings_reads_vision_model_overrides() -> None:
             "SERPAPI_WEB_FALLBACK_ENABLED": "false",
             "SERPAPI_MAX_EXACT_FALLBACKS_PER_MESSAGE": "1",
             "SERPAPI_MAX_WEB_FALLBACKS_PER_MESSAGE": "0",
-            "SERPAPI_TIMEOUT_SECONDS": "6.5",
-            "SERPAPI_LENS_EXACT_LIMIT": "4",
-            "SERPAPI_LENS_VISUAL_LIMIT": "8",
-            "SERPAPI_WEB_CANDIDATE_LIMIT": "1",
-            "VISION_TEMP_STORE_BACKEND": "r2",
             "VISION_TEMP_PUBLISHER_ENABLED": "false",
-            "R2_ACCOUNT_ID": "account",
-            "R2_ACCESS_KEY_ID": "access",
-            "R2_SECRET_ACCESS_KEY": "secret",
-            "R2_BUCKET": "bucket",
-            "R2_PRESIGNED_URL_SECONDS": "180",
-            "R2_OBJECT_PREFIX": "temp/",
             "VISION_CACHE_PATH": "data/test_vision.sqlite3",
         }
     )
@@ -360,16 +342,6 @@ def test_load_settings_reads_vision_model_overrides() -> None:
     assert settings.serpapi_web_fallback_enabled is False
     assert settings.serpapi_max_exact_fallbacks_per_message == 1
     assert settings.serpapi_max_web_fallbacks_per_message == 0
-    assert settings.serpapi_timeout_seconds == 6.5
-    assert settings.serpapi_lens_exact_limit == 4
-    assert settings.serpapi_lens_visual_limit == 8
-    assert settings.serpapi_web_candidate_limit == 1
-    assert settings.r2_account_id == "account"
-    assert settings.r2_access_key_id == "access"
-    assert settings.r2_secret_access_key == "secret"
-    assert settings.r2_bucket == "bucket"
-    assert settings.r2_presigned_url_seconds == 180
-    assert settings.r2_object_prefix == "temp/"
     assert settings.vision_cache_path.as_posix() == "data/test_vision.sqlite3"
 
 
@@ -383,14 +355,9 @@ def test_load_settings_reads_vision_model_overrides() -> None:
         ("VISION_PIPELINE_CACHE_TTL_SECONDS", "0"),
         ("VISION_PIPELINE_MAX_DOWNLOAD_BYTES", "0"),
         ("VISION_PIPELINE_MAX_IMAGE_PIXELS", "0"),
-        ("SERPAPI_TIMEOUT_SECONDS", "0"),
         ("SERPAPI_LENS_TIMEOUT_SECONDS", "0"),
         ("SERPAPI_POLL_INTERVAL_SECONDS", "0"),
         ("SERPAPI_LENS_CONCURRENCY", "0"),
-        ("SERPAPI_LENS_EXACT_LIMIT", "0"),
-        ("SERPAPI_LENS_VISUAL_LIMIT", "0"),
-        ("SERPAPI_WEB_CANDIDATE_LIMIT", "0"),
-        ("R2_PRESIGNED_URL_SECONDS", "0"),
     ],
 )
 def test_load_settings_rejects_invalid_vision_pipeline_values(name: str, value: str) -> None:
@@ -398,14 +365,6 @@ def test_load_settings_rejects_invalid_vision_pipeline_values(name: str, value: 
     env[name] = value
 
     with pytest.raises(ConfigError, match=name):
-        load_settings(env)
-
-
-def test_load_settings_rejects_invalid_temp_store_backend() -> None:
-    env = complete_env()
-    env["VISION_TEMP_STORE_BACKEND"] = "filesystem"
-
-    with pytest.raises(ConfigError, match="VISION_TEMP_STORE_BACKEND"):
         load_settings(env)
 
 
@@ -439,6 +398,29 @@ def test_load_settings_rejects_unimplemented_temp_publisher() -> None:
 
     with pytest.raises(ConfigError, match="VISION_TEMP_PUBLISHER_ENABLED.*not supported"):
         load_settings(env)
+
+
+def test_load_settings_ignores_legacy_r2_and_serpapi_variables() -> None:
+    env = complete_env()
+    env.update(
+        {
+            "VISION_TEMP_STORE_BACKEND": "filesystem",
+            "R2_ACCOUNT_ID": "legacy-account",
+            "R2_ACCESS_KEY_ID": "legacy-access",
+            "R2_SECRET_ACCESS_KEY": "legacy-secret",
+            "R2_BUCKET": "legacy-bucket",
+            "R2_PRESIGNED_URL_SECONDS": "0",
+            "R2_OBJECT_PREFIX": "legacy/",
+            "SERPAPI_TIMEOUT_SECONDS": "0",
+        }
+    )
+
+    settings = load_settings(env)
+
+    assert not hasattr(settings, "vision_temp_store_backend")
+    assert not hasattr(settings, "r2_account_id")
+    assert not hasattr(settings, "r2_bucket")
+    assert not hasattr(settings, "serpapi_timeout_seconds")
 
 
 def test_load_settings_reads_debug_trace_overrides() -> None:

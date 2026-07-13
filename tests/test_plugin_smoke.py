@@ -53,7 +53,6 @@ def test_plugin_requires_only_complete_qwen_vision_settings(monkeypatch) -> None
 
     assert module.vision_settings_complete(complete) is True
     assert module.vision_settings_complete(replace(complete, serpapi_api_key="")) is True
-    assert module.vision_settings_complete(replace(complete, r2_bucket="")) is True
     assert module.vision_settings_complete(replace(complete, vision_model_api_key="")) is False
 
 

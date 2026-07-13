@@ -136,18 +136,7 @@ class Settings:
     serpapi_web_fallback_enabled: bool
     serpapi_max_exact_fallbacks_per_message: int
     serpapi_max_web_fallbacks_per_message: int
-    serpapi_timeout_seconds: float
-    serpapi_lens_exact_limit: int
-    serpapi_lens_visual_limit: int
-    serpapi_web_candidate_limit: int
     vision_temp_publisher_enabled: bool
-    vision_temp_store_backend: str
-    r2_account_id: str
-    r2_access_key_id: str
-    r2_secret_access_key: str
-    r2_bucket: str
-    r2_presigned_url_seconds: int
-    r2_object_prefix: str
     vision_cache_path: Path
     debug_trace_dir: Path
     debug_trace_retention_seconds: int
@@ -276,26 +265,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if serpapi_max_web_fallbacks_per_message < 0:
         raise ConfigError("SERPAPI_MAX_WEB_FALLBACKS_PER_MESSAGE must not be negative")
 
-    serpapi_timeout_seconds = _float(env, "SERPAPI_TIMEOUT_SECONDS", 8.0)
-    if serpapi_timeout_seconds <= 0:
-        raise ConfigError("SERPAPI_TIMEOUT_SECONDS must be greater than 0")
-
-    serpapi_lens_exact_limit = _int(env, "SERPAPI_LENS_EXACT_LIMIT", 5)
-    if serpapi_lens_exact_limit < 1:
-        raise ConfigError("SERPAPI_LENS_EXACT_LIMIT must be greater than 0")
-
-    serpapi_lens_visual_limit = _int(env, "SERPAPI_LENS_VISUAL_LIMIT", 10)
-    if serpapi_lens_visual_limit < 1:
-        raise ConfigError("SERPAPI_LENS_VISUAL_LIMIT must be greater than 0")
-
-    serpapi_web_candidate_limit = _int(env, "SERPAPI_WEB_CANDIDATE_LIMIT", 2)
-    if serpapi_web_candidate_limit < 1:
-        raise ConfigError("SERPAPI_WEB_CANDIDATE_LIMIT must be greater than 0")
-
-    r2_presigned_url_seconds = _int(env, "R2_PRESIGNED_URL_SECONDS", 300)
-    if r2_presigned_url_seconds < 1:
-        raise ConfigError("R2_PRESIGNED_URL_SECONDS must be greater than 0")
-
     vision_model_video_fps = _float(env, "VISION_MODEL_VIDEO_FPS", 2.0)
     if vision_model_video_fps <= 0 or vision_model_video_fps > 10:
         raise ConfigError("VISION_MODEL_VIDEO_FPS must be greater than 0 and at most 10")
@@ -323,12 +292,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     tts_audio_format = env.get("TTS_AUDIO_FORMAT", "wav").strip().lower() or "wav"
     if tts_audio_format not in {"wav", "mp3"}:
         raise ConfigError("TTS_AUDIO_FORMAT must be one of: wav, mp3")
-
-    vision_temp_store_backend = (
-        env.get("VISION_TEMP_STORE_BACKEND", "r2").strip().lower() or "r2"
-    )
-    if vision_temp_store_backend != "r2":
-        raise ConfigError("VISION_TEMP_STORE_BACKEND must be: r2")
 
     vision_temp_publisher_enabled = _bool(env, "VISION_TEMP_PUBLISHER_ENABLED", False)
     if vision_temp_publisher_enabled:
@@ -442,19 +405,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         serpapi_web_fallback_enabled=_bool(env, "SERPAPI_WEB_FALLBACK_ENABLED", True),
         serpapi_max_exact_fallbacks_per_message=serpapi_max_exact_fallbacks_per_message,
         serpapi_max_web_fallbacks_per_message=serpapi_max_web_fallbacks_per_message,
-        serpapi_timeout_seconds=serpapi_timeout_seconds,
-        serpapi_lens_exact_limit=serpapi_lens_exact_limit,
-        serpapi_lens_visual_limit=serpapi_lens_visual_limit,
-        serpapi_web_candidate_limit=serpapi_web_candidate_limit,
         vision_temp_publisher_enabled=vision_temp_publisher_enabled,
-        vision_temp_store_backend=vision_temp_store_backend,
-        r2_account_id=env.get("R2_ACCOUNT_ID", "").strip(),
-        r2_access_key_id=env.get("R2_ACCESS_KEY_ID", "").strip(),
-        r2_secret_access_key=env.get("R2_SECRET_ACCESS_KEY", "").strip(),
-        r2_bucket=env.get("R2_BUCKET", "").strip(),
-        r2_presigned_url_seconds=r2_presigned_url_seconds,
-        r2_object_prefix=env.get("R2_OBJECT_PREFIX", "vision-temp/").strip()
-        or "vision-temp/",
         vision_cache_path=Path(env.get("VISION_CACHE_PATH", "data/vision_cache.sqlite3")),
         debug_trace_dir=Path(env.get("DEBUG_TRACE_DIR", "data/debug_traces")),
         debug_trace_retention_seconds=debug_trace_retention_seconds,

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 import time
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -12,24 +11,15 @@ from qq_rolebot.debug_trace import DebugTrace
 from qq_rolebot.image_preprocessor import NormalizedImage
 from qq_rolebot.vision_types import (
     ConfidenceBand,
-    IdentityCandidate,
     ImageDecision,
     ImageFallbackEvidence,
     ImageLensResult,
-    LensEvidence,
     SearchSource,
     VisionObservation,
     VisionSynthesis,
 )
 
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-
-
-@dataclass(frozen=True)
-class VisualAnalysis:
-    observation: VisionObservation
-    candidates: tuple[IdentityCandidate, ...] = ()
-    error: str = ""
 
 
 class VisualAnalyzer:
@@ -131,40 +121,6 @@ class VisualAnalyzer:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def analyze_image(
-        self,
-        image: NormalizedImage,
-        *,
-        user_question: str,
-        chat_context: str,
-        trace: DebugTrace | None = None,
-        timeout_seconds: float | None = None,
-    ) -> VisualAnalysis:
-        prompt = (
-            "你是视觉证据提取器，只输出符合 JSON schema 的客观结果。"
-            "描述画面、可见文字、人物或虚构角色、显著特征。"
-            "可以提出谨慎的身份候选，但仅凭相似外观不得视为确认。"
-            "看不清时保留空数组或明确描述不确定。\n"
-            f"用户问题：{self._bounded(user_question, 500)}\n"
-            f"最近聊天：{self._bounded(chat_context, 1500)}"
-        )
-        payload = self._payload(
-            content=[
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": image.data_url()}},
-            ],
-            schema=self._analysis_schema(),
-        )
-        data, error = await self._request(
-            payload,
-            event_prefix="vision.visual",
-            trace=trace,
-            timeout_seconds=timeout_seconds,
-        )
-        if error:
-            return VisualAnalysis(observation=VisionObservation(), error=error)
-        return self._parse_analysis(data, source_stage="visual")
-
     async def describe_dynamic_media(
         self,
         video_urls: list[str],
@@ -193,7 +149,7 @@ class VisualAnalyzer:
         )
         payload = self._payload(
             content=content,
-            schema=self._analysis_schema(),
+            schema=self._dynamic_schema(),
             enable_thinking=False,
         )
         data, error = await self._request(
@@ -204,42 +160,12 @@ class VisualAnalyzer:
         )
         if error:
             return VisionObservation()
-        return self._parse_analysis(data, source_stage="dynamic").observation
-
-    async def extract_search_candidates(
-        self,
-        lens: LensEvidence,
-        *,
-        observation: VisionObservation,
-        user_question: str,
-        trace: DebugTrace | None = None,
-        timeout_seconds: float | None = None,
-    ) -> tuple[IdentityCandidate, ...]:
-        evidence_lines = []
-        for source in (*lens.exact_matches, *lens.visual_matches)[:15]:
-            evidence_lines.append(
-                f"[{source.result_kind}] {source.title} | {source.domain} | {source.snippet}"
-            )
-        prompt = (
-            "从规范化的相似图结果中抽取可能的人物、虚构角色和作品候选。"
-            "只抽取文本明确支持的实体，不确认身份，不补充搜索结果中没有的信息。\n"
-            f"用户问题：{self._bounded(user_question, 500)}\n"
-            f"画面观察：{self._bounded(observation.scene_description, 500)}\n"
-            f"相似图结果：\n{self._bounded(chr(10).join(evidence_lines), 3000)}"
+        return VisionObservation(
+            scene_description=self._safe_output(self._text(data.get("scene_description")), 500),
+            visible_text=self._strings(data.get("visible_text"))[:12],
+            people_or_characters=self._strings(data.get("people_or_characters"))[:12],
+            distinctive_features=self._strings(data.get("distinctive_features"))[:12],
         )
-        payload = self._payload(
-            content=[{"type": "text", "text": prompt}],
-            schema=self._candidate_schema(),
-        )
-        data, error = await self._request(
-            payload,
-            event_prefix="vision.lens_extract",
-            trace=trace,
-            timeout_seconds=timeout_seconds,
-        )
-        if error:
-            return ()
-        return self._parse_candidates(data, source_stage="lens_extraction")
 
     def _payload(
         self,
@@ -450,53 +376,8 @@ class VisualAnalyzer:
             "verification_query": cls._bounded(decision.verification_query, 250),
         }
 
-    def _parse_analysis(self, data: dict[str, Any], *, source_stage: str) -> VisualAnalysis:
-        try:
-            observation = VisionObservation(
-                scene_description=self._text(data.get("scene_description")),
-                visible_text=self._strings(data.get("visible_text")),
-                people_or_characters=self._strings(data.get("people_or_characters")),
-                distinctive_features=self._strings(data.get("distinctive_features")),
-            )
-            candidates = self._parse_candidates(data, source_stage=source_stage)
-        except (TypeError, ValueError) as exc:
-            return VisualAnalysis(
-                observation=VisionObservation(),
-                error=f"invalid visual response: {self._exception_text(exc)}",
-            )
-        return VisualAnalysis(observation=observation, candidates=candidates)
-
-    @classmethod
-    def _parse_candidates(
-        cls,
-        data: dict[str, Any],
-        *,
-        source_stage: str,
-    ) -> tuple[IdentityCandidate, ...]:
-        raw_candidates = data.get("identity_candidates", [])
-        if not isinstance(raw_candidates, list):
-            raise TypeError("identity_candidates must be a list")
-        candidates: list[IdentityCandidate] = []
-        for item in raw_candidates:
-            if not isinstance(item, dict):
-                continue
-            name = cls._text(item.get("name"))
-            entity_type = cls._text(item.get("entity_type"))
-            if not name or not entity_type:
-                continue
-            candidates.append(
-                IdentityCandidate(
-                    name=name,
-                    entity_type=entity_type,
-                    work_or_affiliation=cls._text(item.get("work_or_affiliation")),
-                    visual_reason=cls._text(item.get("visual_reason")),
-                    source_stage=source_stage,
-                )
-            )
-        return tuple(candidates)
-
     @staticmethod
-    def _analysis_schema() -> dict[str, Any]:
+    def _dynamic_schema() -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -504,46 +385,13 @@ class VisualAnalyzer:
                 "visible_text": {"type": "array", "items": {"type": "string"}},
                 "people_or_characters": {"type": "array", "items": {"type": "string"}},
                 "distinctive_features": {"type": "array", "items": {"type": "string"}},
-                "identity_candidates": {
-                    "type": "array",
-                    "items": VisualAnalyzer._candidate_item_schema(),
-                },
             },
             "required": [
                 "scene_description",
                 "visible_text",
                 "people_or_characters",
                 "distinctive_features",
-                "identity_candidates",
             ],
-            "additionalProperties": False,
-        }
-
-    @staticmethod
-    def _candidate_schema() -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "identity_candidates": {
-                    "type": "array",
-                    "items": VisualAnalyzer._candidate_item_schema(),
-                }
-            },
-            "required": ["identity_candidates"],
-            "additionalProperties": False,
-        }
-
-    @staticmethod
-    def _candidate_item_schema() -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "entity_type": {"type": "string"},
-                "work_or_affiliation": {"type": "string"},
-                "visual_reason": {"type": "string"},
-            },
-            "required": ["name", "entity_type", "work_or_affiliation", "visual_reason"],
             "additionalProperties": False,
         }
 
