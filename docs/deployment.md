@@ -561,7 +561,8 @@ HTML-capable mail clients also show a `获取新二维码` button. When
 `WATCHDOG_CLICK_PUBLIC_BASE_URL` is configured, the button opens a server endpoint that refreshes
 NapCat and sends a fresh QR email to the administrator mailbox. The web page does not display the
 QR image. If no public click URL is configured, the button falls back to the older `mailto:` reply
-draft flow.
+draft flow. For a reply-only policy, leave the public click URL empty and stop/disable the optional
+`napcat-qr-click.service`.
 
 Create `/opt/qq-rolebot/.watchdog.env` on the server. This file is server-only and must be mode
 `600`.
@@ -578,6 +579,7 @@ WATCHDOG_ONEBOT_HTTP_API_TOKEN=
 WATCHDOG_ONEBOT_HTTP_API_TIMEOUT_SECONDS=5
 WATCHDOG_LOG_WINDOW_MINUTES=10
 WATCHDOG_STATE_PATH=/opt/qq-rolebot/data/account_watchdog_state.json
+WATCHDOG_SEND_OFFLINE=true
 WATCHDOG_SEND_RECOVERY=true
 WATCHDOG_QR_PATH=
 WATCHDOG_QR_GLOB=/root/Napcat/**/cache/qrcode.png
@@ -610,6 +612,10 @@ IMAP_PASSWORD=qq-mail-authorization-code
 
 `SMTP_PASSWORD` and `IMAP_PASSWORD` are QQ Mail authorization codes, not the QQ account password.
 Enable SMTP and IMAP in QQ Mail settings before using this file.
+
+To keep health checks and IMAP polling while disabling proactive offline and recovery emails, set
+both `WATCHDOG_SEND_OFFLINE=false` and `WATCHDOG_SEND_RECOVERY=false`. The authorized reply flow
+still sends a fresh QR email when `WATCHDOG_REPLY_ENABLED=true`.
 
 Install `/etc/systemd/system/napcat-account-watchdog.service`:
 

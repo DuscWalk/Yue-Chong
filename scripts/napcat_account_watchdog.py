@@ -53,6 +53,7 @@ class WatchdogConfig:
     watchdog_onebot_http_api_timeout_seconds: int = 5
     watchdog_log_window_minutes: int = 10
     watchdog_state_path: str = "/opt/qq-rolebot/data/account_watchdog_state.json"
+    watchdog_send_offline: bool = True
     watchdog_send_recovery: bool = True
     watchdog_qr_path: str = ""
     watchdog_qr_glob: str = "/root/Napcat/**/cache/qrcode.png"
@@ -173,6 +174,7 @@ def load_config(env: Mapping[str, str]) -> WatchdogConfig:
             "WATCHDOG_STATE_PATH",
             "/opt/qq-rolebot/data/account_watchdog_state.json",
         ),
+        watchdog_send_offline=_bool(env.get("WATCHDOG_SEND_OFFLINE"), True),
         watchdog_send_recovery=_bool(env.get("WATCHDOG_SEND_RECOVERY"), True),
         watchdog_qr_path=env.get("WATCHDOG_QR_PATH", ""),
         watchdog_qr_glob=env.get("WATCHDOG_QR_GLOB", "/root/Napcat/**/cache/qrcode.png"),
@@ -679,7 +681,7 @@ def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthRe
         report,
         send_recovery=config.watchdog_send_recovery,
     )
-    if email_kind == "offline":
+    if email_kind == "offline" and config.watchdog_send_offline:
         qr_path = _fresh_qr_after_optional_refresh(config, deps, force_refresh=False)
         subject = f"[qq-rolebot] QQ account may be offline [qr:{token}]"
         if _send_if_configured(

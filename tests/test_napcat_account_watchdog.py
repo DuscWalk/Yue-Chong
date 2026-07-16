@@ -37,8 +37,22 @@ def test_load_config_uses_qq_mail_defaults() -> None:
     assert config.imap_host == "imap.qq.com"
     assert config.watchdog_host == "127.0.0.1"
     assert config.watchdog_port == 8080
+    assert config.watchdog_send_offline is True
+    assert config.watchdog_send_recovery is True
     assert config.alert_email_from == "sender@qq.com"
     assert config.alert_email_to == ["admin@example.com"]
+
+
+def test_load_config_can_disable_proactive_status_emails() -> None:
+    config = load_config(
+        {
+            "WATCHDOG_SEND_OFFLINE": "false",
+            "WATCHDOG_SEND_RECOVERY": "false",
+        }
+    )
+
+    assert config.watchdog_send_offline is False
+    assert config.watchdog_send_recovery is False
 
 
 def test_load_config_can_disable_onebot_connection_requirement() -> None:
@@ -414,6 +428,51 @@ def test_run_watchdog_sends_recovery_email_after_unhealthy(tmp_path: Path) -> No
     assert sent[1]["Subject"] == "[qq-rolebot] QQ account recovered"
 
 
+def test_run_watchdog_can_suppress_proactive_status_emails(tmp_path: Path) -> None:
+    sent = []
+    config = WatchdogConfig(
+        watchdog_state_path=str(tmp_path / "state.json"),
+        watchdog_send_offline=False,
+        watchdog_send_recovery=False,
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    unhealthy_deps = WatchdogDependencies(
+        service_is_active=lambda service: False,
+        tcp_connect=lambda host, port: False,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 100.0,
+        token_factory=lambda: "abc123",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+    healthy_deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 200.0,
+        token_factory=lambda: "def456",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    run_watchdog(config, unhealthy_deps)
+    report = run_watchdog(config, healthy_deps)
+
+    assert report.status == "healthy"
+    assert sent == []
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["status"] == "healthy"
+
+
 def test_run_watchdog_marks_missing_onebot_connection_unhealthy(tmp_path: Path) -> None:
     sent = []
     config = WatchdogConfig(
@@ -490,6 +549,8 @@ def test_run_watchdog_reply_sends_fresh_qr_and_marks_uid(tmp_path: Path) -> None
     config = WatchdogConfig(
         watchdog_state_path=str(state_path),
         watchdog_qr_path=str(qr),
+        watchdog_send_offline=False,
+        watchdog_send_recovery=False,
         watchdog_reply_enabled=True,
         watchdog_reply_allowed_senders=["admin@example.com"],
         smtp_user="sender@qq.com",
