@@ -97,17 +97,23 @@ BOT_QQ=<the account for this instance>
 PERSONA_VARIANT=custom
 PERSONA_PATH=personas/<persona>.yaml
 DATABASE_PATH=/opt/qq-rolebot/data/<name>.sqlite3
+MEDIA_STICKER_ROOT=/opt/qq-rolebot/stickers/<name>
+MEDIA_STICKER_MANIFEST=/opt/qq-rolebot/stickers/<name>/manifest.yaml
 MEDIA_CUSTOM_FACE_CACHE=/opt/qq-rolebot/data/<name>-custom_faces.json
 TTS_CACHE_DIR=/opt/qq-rolebot/data/<name>-voice_cache
+TTS_SPEAKER=<voice id dedicated to this persona>
+TTS_STYLE=<persona-specific delivery instruction>
+TTS_DIALECT_HINT=neutral
+TTS_REF_AUDIO_PATH=<persona-specific reference path, only for GPT-SoVITS>
 VISION_CACHE_PATH=/opt/qq-rolebot/data/<name>-vision_cache.sqlite3
 DEBUG_TRACE_DIR=/opt/qq-rolebot/data/<name>-debug_traces
 ```
 
-Do not share SQLite files, custom-face caches, voice caches, vision caches, or debug-trace
-directories between instances. Static model weights and read-only sticker assets may be shared.
-Keep `GROUP_WHITELIST` and administrator settings explicit per instance. A new database begins with
-all groups disabled, so an administrator must run `/bot on` for that specific bot before it replies
-in a group.
+Do not share SQLite files, sticker roots or manifests, custom-face caches, voice caches, voice
+speaker/style settings, vision caches, or debug-trace directories between instances. Static model
+weights may be shared. Keep `GROUP_WHITELIST` and administrator settings explicit per instance. A
+new database begins with all groups disabled, so an administrator must run `/bot on` for that
+specific bot before it replies in a group.
 
 Install the versioned unit templates after deploying source:
 
@@ -363,8 +369,8 @@ TTS_MAX_CHARS=80
 TTS_COOLDOWN_SECONDS=0
 TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
 TTS_SPEAKER=
-TTS_STYLE=沉稳自然，武汉话日常短句，连贯不逐字
-TTS_DIALECT_HINT=武汉话
+TTS_STYLE=
+TTS_DIALECT_HINT=neutral
 ```
 
 Set `TTS_COOLDOWN_SECONDS=0` to remove voice cooldown.
@@ -675,8 +681,8 @@ TTS_MODEL=cosyvoice-v2
 TTS_AUDIO_FORMAT=mp3
 TTS_TEXT_LANG=zh
 TTS_SPEAKER=
-TTS_STYLE=沉稳自然，武汉话日常短句，连贯不逐字
-TTS_DIALECT_HINT=武汉话
+TTS_STYLE=
+TTS_DIALECT_HINT=neutral
 TTS_TIMEOUT_SECONDS=30
 TTS_CACHE_DIR=/opt/qq-rolebot/data/voice_cache
 ```

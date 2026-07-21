@@ -207,8 +207,8 @@ def test_load_settings_reads_tts_defaults() -> None:
     assert settings.tts_max_chars == 80
     assert settings.tts_cooldown_seconds == 120
     assert settings.tts_cache_dir.name == "voice_cache"
-    assert settings.tts_speaker == "chongyue"
-    assert settings.tts_style == "calm"
+    assert settings.tts_speaker == ""
+    assert settings.tts_style == ""
     assert settings.tts_dialect_hint == "neutral"
     assert settings.followup_window_seconds == 90
     assert "你" in settings.followup_trigger_keywords

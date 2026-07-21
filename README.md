@@ -101,7 +101,8 @@ Required basics:
   text.
 - `MEDIA_REPLY_PRIVATE_PROBABILITY`: optional private-chat override; when unset, it inherits
   `MEDIA_REPLY_PROBABILITY`.
-- `MEDIA_STICKER_ROOT`: persistent sticker asset directory. Production default should be `/opt/qq-rolebot/stickers`.
+- `MEDIA_STICKER_ROOT`: persistent sticker asset directory. In multi-instance production, set a
+  distinct root such as `/opt/qq-rolebot/stickers/<instance>` for every role.
 - `MEDIA_STICKER_MANIFEST`: optional manifest path; defaults to `MEDIA_STICKER_ROOT/manifest.yaml`.
 - `MEDIA_REGISTER_CUSTOM_FACES`: when true, active image assets are registered to the bot QQ
   account through NapCat `/add_custom_face`.
@@ -112,6 +113,9 @@ NapCat's `mface` send path is for marketplace stickers. Local images can be regi
 custom faces, but active sends fall back to an `image` segment marked with NapCat custom-image
 `sub_type=1` unless a manifest item contains complete sendable `mface` metadata (`emoji_id`,
 `emoji_package_id`, `key`, and `summary`).
+
+`TTS_SPEAKER`, `TTS_STYLE`, and `TTS_DIALECT_HINT` are intentionally empty or neutral by default.
+Set them explicitly per persona; a role must never inherit another role's voice configuration.
 - `VISION_MODEL_ENABLED`: whether to run the evidence-driven vision pipeline after the reply policy has already allowed a response.
 - `VISION_MODEL_API_BASE`, `VISION_MODEL_API_KEY`, `VISION_MODEL_NAME`: OpenAI-compatible visual-analysis model settings.
 - `VISION_MODEL_TIMEOUT_SECONDS`: component cap for visual-model calls; default is `20` seconds.
@@ -269,8 +273,8 @@ Supported backends:
 For the current Wuhan dialect persona, keep:
 
 ```dotenv
-TTS_STYLE=沉稳自然，武汉话日常短句，连贯不逐字
-TTS_DIALECT_HINT=武汉话
+TTS_STYLE=
+TTS_DIALECT_HINT=neutral
 ```
 
 Generated audio is cached under `TTS_CACHE_DIR`. If TTS fails, the bot falls back to text.
