@@ -1,0 +1,10 @@
+[Unit]
+Description=NapCat account watchdog for %i
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/qq-rolebot
+EnvironmentFile=/etc/qq-rolebot/watchdogs/%i.env
+ExecStart=/opt/miniconda3/envs/qq-rolebot/bin/python /opt/qq-rolebot/scripts/napcat_account_watchdog.py
+User=root

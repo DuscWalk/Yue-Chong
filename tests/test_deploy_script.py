@@ -73,6 +73,45 @@ def test_deploy_script_waits_for_bot_port_after_restart() -> None:
     assert active_index < wait_index
 
 
+def test_deploy_script_restarts_all_declared_instances() -> None:
+    script = SCRIPT.read_text(encoding="utf-8")
+
+    assert 'INSTANCE_CONFIG_DIR="${INSTANCE_CONFIG_DIR:-/etc/qq-rolebot/instances}"' in script
+    assert "restart_instance_services() {" in script
+    assert 'env_files=("$INSTANCE_CONFIG_DIR"/*.env)' in script
+    assert 'service="qq-rolebot@${instance}.service"' in script
+    assert 'port="$(read_env_value "$env_file" BOT_PORT)"' in script
+    assert "restart_configured_services" in script
+
+
+def test_multi_instance_systemd_templates_keep_state_outside_deployed_app() -> None:
+    rolebot_unit = Path("deploy/systemd/qq-rolebot@.service").read_text(encoding="utf-8")
+    napcat_unit = Path("deploy/systemd/napcat@.service").read_text(encoding="utf-8")
+    watchdog_unit = Path("deploy/systemd/napcat-account-watchdog@.service").read_text(
+        encoding="utf-8"
+    )
+    watchdog_timer = Path("deploy/systemd/napcat-account-watchdog@.timer").read_text(
+        encoding="utf-8"
+    )
+
+    assert "EnvironmentFile=/etc/qq-rolebot/instances/%i.env" in rolebot_unit
+    assert "WorkingDirectory=/opt/qq-rolebot" in rolebot_unit
+    assert "WorkingDirectory=/root/Napcat-%i" in napcat_unit
+    assert "run_napcat_instance.sh %i" in napcat_unit
+    assert "EnvironmentFile=/etc/qq-rolebot/watchdogs/%i.env" in watchdog_unit
+    assert "Unit=napcat-account-watchdog@%i.service" in watchdog_timer
+
+
+def test_napcat_instance_runner_isolates_account_profile_directories() -> None:
+    runner = Path("scripts/run_napcat_instance.sh").read_text(encoding="utf-8")
+
+    assert 'runtime_root="/root/Napcat-$instance"' in runner
+    assert 'export HOME="$runtime_root/home"' in runner
+    assert 'export XDG_CONFIG_HOME="$HOME/.config"' in runner
+    assert 'export XDG_RUNTIME_DIR="$runtime_root/run"' in runner
+    assert 'exec /bin/xvfb-run -a "$qq_binary" --no-sandbox -q "$account"' in runner
+
+
 def test_github_actions_uploads_archive_instead_of_server_fetching_github() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 

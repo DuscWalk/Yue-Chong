@@ -1,0 +1,15 @@
+[Unit]
+Description=NapCat QR click webhook for %i
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/qq-rolebot
+EnvironmentFile=/etc/qq-rolebot/watchdogs/%i.env
+ExecStart=/opt/miniconda3/envs/qq-rolebot/bin/python /opt/qq-rolebot/scripts/napcat_account_watchdog.py --serve-click-webhook
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

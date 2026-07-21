@@ -4,6 +4,35 @@ This document is the production runbook for the QQ rolebot. The current producti
 
 Do not put secrets in this repository. Keep API keys, QQ login data, voice references, generated audio, model weights, and container images on the server only.
 
+## Current Production Connection
+
+The current production target is recorded here so routine maintenance does not depend on
+undocumented local knowledge. These are connection parameters, not credentials:
+
+```text
+DEPLOY_HOST=120.26.110.68
+DEPLOY_USER=root
+DEPLOY_PORT=22
+Application directory=/opt/qq-rolebot
+```
+
+For an operator's local SSH configuration, use a non-repository alias such as:
+
+```sshconfig
+Host qq-rolebot-prod
+    HostName 120.26.110.68
+    User root
+    Port 22
+    IdentityFile /home/duscwalk/.ssh/id_ed25519
+    IdentitiesOnly yes
+```
+
+The private key itself must remain in the operator's `~/.ssh` directory and its public key must
+be authorized for `root` on the server. Do not add the key, server `.env`, QQ account data, QR
+codes, or login URLs to this repository. GitHub Actions uses the same host, user, and port through
+`DEPLOY_HOST`, `DEPLOY_USER`, and `DEPLOY_PORT`; its key remains exclusively in the
+`DEPLOY_SSH_KEY` repository secret.
+
 ## Server Layout
 
 Expected paths:
@@ -21,6 +50,8 @@ Expected paths:
 /opt/cosyvoice                          optional local CosyVoice runtime
 /opt/gptsovits                          optional GPT-SoVITS runtime
 /opt/models                             optional local model weights
+/etc/qq-rolebot/instances/<name>.env    per-rolebot server-only runtime config
+/root/Napcat-<name>                     isolated NapCat/QQ runtime for one account
 ```
 
 CI/CD preserves `.env`, `.watchdog.env`, `data/`, `voice_refs`, `voice_cache`, `models/`, and
@@ -33,6 +64,112 @@ When `MEDIA_REGISTER_CUSTOM_FACES=true`, the bot registers manifest image assets
 NapCat `mface` sending is marketplace-sticker-specific, so locally registered custom faces may still
 be sent as `image` segments marked with custom-image `sub_type=1` unless the manifest item includes
 complete sendable `mface` metadata.
+
+## Multi-Instance Production
+
+Production supports any number of isolated rolebot instances. Each account runs a separate Python
+process and a separate NapCat/QQ runtime, while all processes share the deployed source under
+`/opt/qq-rolebot` and the Python environment. This prevents personas, chat context, group settings,
+custom-face registration, voice cache, and OneBot connections from crossing accounts.
+
+Use a lowercase instance name containing only letters, numbers, `_`, and `-`. Each instance needs:
+
+```text
+/etc/qq-rolebot/instances/<name>.env
+/root/Napcat-<name>/
+qq-rolebot@<name>.service
+napcat@<name>.service
+```
+
+Create the server-only instance-config directory with restrictive permissions:
+
+```bash
+sudo install -d -m 700 /etc/qq-rolebot/instances
+```
+
+Copy an existing server `.env` file into `/etc/qq-rolebot/instances/<name>.env`, retain its
+provider credentials there, and update at least the following values for the new account:
+
+```dotenv
+BOT_HOST=127.0.0.1
+BOT_PORT=<unique port, for example 8081>
+BOT_QQ=<the account for this instance>
+PERSONA_VARIANT=custom
+PERSONA_PATH=personas/<persona>.yaml
+DATABASE_PATH=/opt/qq-rolebot/data/<name>.sqlite3
+MEDIA_CUSTOM_FACE_CACHE=/opt/qq-rolebot/data/<name>-custom_faces.json
+TTS_CACHE_DIR=/opt/qq-rolebot/data/<name>-voice_cache
+VISION_CACHE_PATH=/opt/qq-rolebot/data/<name>-vision_cache.sqlite3
+DEBUG_TRACE_DIR=/opt/qq-rolebot/data/<name>-debug_traces
+```
+
+Do not share SQLite files, custom-face caches, voice caches, vision caches, or debug-trace
+directories between instances. Static model weights and read-only sticker assets may be shared.
+Keep `GROUP_WHITELIST` and administrator settings explicit per instance. A new database begins with
+all groups disabled, so an administrator must run `/bot on` for that specific bot before it replies
+in a group.
+
+Install the versioned unit templates after deploying source:
+
+```bash
+sudo install -D -m 644 /opt/qq-rolebot/deploy/systemd/qq-rolebot@.service \
+  /etc/systemd/system/qq-rolebot@.service
+sudo install -D -m 644 /opt/qq-rolebot/deploy/systemd/napcat@.service \
+  /etc/systemd/system/napcat@.service
+sudo systemctl daemon-reload
+```
+
+For every QQ account, create a fully isolated `/root/Napcat-<name>` runtime. It must contain its
+own `opt/QQ` installation, `napcat.env` with `ACCOUNT=<qq-number>`, WebUI port, account-specific
+`onebot11_<qq-number>.json`, and `home/` profile directory. Configure that account's reverse
+WebSocket client to `ws://127.0.0.1:<BOT_PORT>/onebot/v11/ws` and use the matching
+`ONEBOT_ACCESS_TOKEN` from the same instance env file. Do not run two accounts from the same
+NapCat runtime root or share their `HOME` / XDG profile directories.
+
+Enable an instance pair:
+
+```bash
+sudo systemctl enable --now napcat@<name>.service
+sudo systemctl enable --now qq-rolebot@<name>.service
+```
+
+Check one instance without exposing secrets:
+
+```bash
+systemctl status napcat@<name> --no-pager -l
+systemctl status qq-rolebot@<name> --no-pager -l
+journalctl -u napcat@<name> -n 160 --no-pager -l
+journalctl -u qq-rolebot@<name> -n 120 --no-pager -l
+ss -ltnp | grep ':<BOT_PORT>'
+```
+
+`scripts/deploy_server.sh` installs the templates and automatically discovers every
+`/etc/qq-rolebot/instances/*.env` file. It restarts and waits for every declared
+`qq-rolebot@<name>.service`; when that directory does not exist, it retains the legacy single
+`qq-rolebot.service` behavior for backward compatibility.
+
+The optional account watchdog also has instance templates. Copy the existing server-only watchdog
+configuration to `/etc/qq-rolebot/watchdogs/<name>.env`, then make these values instance-specific:
+
+```dotenv
+WATCHDOG_BOT_SERVICE=qq-rolebot@<name>.service
+WATCHDOG_NAPCAT_SERVICE=napcat@<name>.service
+WATCHDOG_PORT=<the same BOT_PORT as the rolebot instance>
+WATCHDOG_STATE_PATH=/opt/qq-rolebot/data/<name>-account_watchdog_state.json
+WATCHDOG_QR_GLOB=/root/Napcat-<name>/**/cache/qrcode.png
+WATCHDOG_QR_REFRESH_COMMAND="systemctl restart napcat@<name>.service"
+```
+
+Enable it only after its mail settings are verified, so new accounts do not produce duplicate
+offline alerts:
+
+```bash
+sudo install -d -m 700 /etc/qq-rolebot/watchdogs
+sudo systemctl enable --now napcat-account-watchdog@<name>.timer
+```
+
+The optional QR click webhook follows the same config convention but needs a unique
+`WATCHDOG_CLICK_PORT` for every enabled instance.
 
 ## 1. Base System Setup
 
@@ -234,7 +371,7 @@ Set `TTS_COOLDOWN_SECONDS=0` to remove voice cooldown.
 
 Never paste real keys into committed files or public logs.
 
-## 3. systemd Service
+## 3. Legacy Single-Instance systemd Service
 
 Create `/etc/systemd/system/qq-rolebot.service`:
 
@@ -348,8 +485,10 @@ The deploy script:
 - restores `.env`, `.watchdog.env`, and runtime directories;
 - installs the package in the conda environment;
 - runs server-side `ruff` and `pytest`;
-- restarts `qq-rolebot.service`;
-- waits until `127.0.0.1:8080` accepts TCP connections.
+- installs the versioned instance unit templates;
+- restarts every `qq-rolebot@<name>.service` declared in `/etc/qq-rolebot/instances/`, or the
+  legacy `qq-rolebot.service` when no instance configs exist;
+- waits until every declared instance port accepts TCP connections.
 
 If the final port check fails, the Action should fail and print recent service logs.
 
@@ -727,7 +866,8 @@ ss -ltnp | grep ':8080'
 grep -E '^(BOT_HOST|BOT_PORT)=' /opt/qq-rolebot/.env
 ```
 
-`BOT_PORT` must match the port in NapCat's reverse WebSocket URL. CI/CD now waits for `127.0.0.1:8080`, so persistent refused connections should fail deployment.
+`BOT_PORT` must match the port in NapCat's reverse WebSocket URL. CI/CD waits for every declared
+instance port, so persistent refused connections should fail deployment.
 
 ### Private chat replies but group chat does not
 
@@ -799,4 +939,4 @@ Common causes:
 - `/opt/miniconda3/envs/qq-rolebot` missing;
 - `.env` missing required variables;
 - tests failing on the server;
-- service starts but does not listen on `127.0.0.1:8080`.
+- a declared rolebot service starts but does not listen on its configured `BOT_PORT`.

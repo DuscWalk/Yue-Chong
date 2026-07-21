@@ -1,0 +1,16 @@
+[Unit]
+Description=QQ Rolebot instance %i
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/qq-rolebot
+EnvironmentFile=/etc/qq-rolebot/instances/%i.env
+ExecStart=/opt/miniconda3/envs/qq-rolebot/bin/python /opt/qq-rolebot/bot.py
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

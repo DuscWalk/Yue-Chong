@@ -21,7 +21,8 @@ This is a NapCatQQ + NoneBot2 QQ roleplay bot.
 - Service orchestration: `qq_rolebot/service.py`
 - Trigger and follow-up policy: `qq_rolebot/policy.py`
 - Config parsing: `qq_rolebot/config.py`
-- Persona files: `personas/default_dialect.yaml` and `personas/default.yaml`
+- Persona files: `personas/default_dialect.yaml`, `personas/default.yaml`, and
+  `personas/lemuen.yaml`
 - Deployment script: `scripts/deploy_server.sh`
 - Production runbook: `docs/deployment.md`
 - User-facing overview: `README.md`
@@ -31,19 +32,20 @@ The default persona variant is Wuhan-dialect Chongyue via `PERSONA_VARIANT=diale
 ## Local Environment
 
 - The local workspace is now Ubuntu/WSL under `/home/duscwalk/toys/qqBots`.
-- Use the dedicated conda environment, not base Python. If conda is missing, install Miniconda
-  under `~/miniconda3` and create a fresh Python 3.11 environment.
+- Use the dedicated conda environment, not base Python. The Codex execution user can be `root`,
+  so do not resolve `~` for this path; use `/home/duscwalk/miniconda3`. If it is missing, install
+  Miniconda there and create a fresh Python 3.11 environment.
 - Preferred local Python:
 
 ```bash
-~/miniconda3/envs/qq-rolebot-wsl/bin/python
+/home/duscwalk/miniconda3/envs/qq-rolebot-wsl/bin/python
 ```
 
 Useful commands:
 
 ```bash
-~/miniconda3/envs/qq-rolebot-wsl/bin/python -m ruff check .
-~/miniconda3/envs/qq-rolebot-wsl/bin/python -m pytest -q
+/home/duscwalk/miniconda3/envs/qq-rolebot-wsl/bin/python -m ruff check .
+/home/duscwalk/miniconda3/envs/qq-rolebot-wsl/bin/python -m pytest -q
 git diff --check
 ```
 
@@ -88,7 +90,8 @@ Expected server layout:
 /opt/qq-rolebot/.env
 /opt/qq-rolebot/data
 /opt/miniconda3/envs/qq-rolebot
-/root/Napcat
+/etc/qq-rolebot/instances/<name>.env
+/root/Napcat-<name>
 ```
 
 GitHub Actions deploys pushes to `master` by uploading a source archive to the server. The server
@@ -115,21 +118,22 @@ Server-only artifacts must never be copied into git:
 
 When the bot does not reply, distinguish these layers:
 
-1. `qq-rolebot.service` is the Python bot and should listen on `127.0.0.1:8080`.
-2. `napcat.service` is the QQ/NapCat gateway.
+1. `qq-rolebot@<name>.service` is one Python bot instance and should listen on its configured
+   `BOT_PORT`.
+2. `napcat@<name>.service` is that instance's QQ/NapCat gateway.
 3. QQ login state can expire even when both services are running.
 
 Useful server checks:
 
 ```bash
-systemctl status qq-rolebot --no-pager -l
-journalctl -u qq-rolebot -n 120 --no-pager -l
-ss -ltnp | grep ':8080'
-systemctl status napcat --no-pager -l
-journalctl -u napcat -n 160 --no-pager -l
+systemctl status qq-rolebot@<name> --no-pager -l
+journalctl -u qq-rolebot@<name> -n 120 --no-pager -l
+ss -ltnp | grep ':<BOT_PORT>'
+systemctl status napcat@<name> --no-pager -l
+journalctl -u napcat@<name> -n 160 --no-pager -l
 ```
 
-If `qq-rolebot` is healthy but NapCat logs `bot_offline`, `登录态已失效`, or no OneBot WebSocket
+If `qq-rolebot@<name>` is healthy but NapCat logs `bot_offline`, `登录态已失效`, or no OneBot WebSocket
 events, the QQ account is not logged in.
 
 For QR login recovery, prefer generating a fresh QR code immediately before asking the user to
@@ -137,8 +141,8 @@ scan it. Old QR codes expire quickly. Do not commit downloaded QR images such as
 `napcat-qrcode.png`.
 
 If NapCat is configured with password fallback and logs that captcha or SMS verification is
-required, switch temporarily to QR login by disabling password fallback in `/root/Napcat/napcat.env`
-after making a root-only backup.
+required, switch temporarily to QR login by disabling password fallback in
+`/root/Napcat-<name>/napcat.env` after making a root-only backup.
 
 ## Security And Privacy
 

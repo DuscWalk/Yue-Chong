@@ -1,0 +1,12 @@
+[Unit]
+Description=Run NapCat account watchdog for %i every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=napcat-account-watchdog@%i.service
+
+[Install]
+WantedBy=timers.target

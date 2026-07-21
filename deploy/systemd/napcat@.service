@@ -1,0 +1,15 @@
+[Unit]
+Description=NapCatQQ instance %i
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/Napcat-%i
+ExecStart=/opt/qq-rolebot/scripts/run_napcat_instance.sh %i
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
